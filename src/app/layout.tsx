@@ -46,7 +46,7 @@ export default function RootLayout({
               <Link href="/new" className="hover:text-foreground transition-colors">
                 Analysis
               </Link>
-              <Link href="/trading" className="hover:text-foreground transition-colors">
+              <Link href="/pilot" className="hover:text-foreground transition-colors">
                 Pilot
               </Link>
             </nav>

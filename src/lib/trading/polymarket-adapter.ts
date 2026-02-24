@@ -79,6 +79,11 @@ export class PolymarketAdapter implements TradingPlatformAdapter {
     this.wallet = new ethers.Wallet(privateKey, this.provider);
   }
 
+  /** Expose provider for external use (e.g. checking native USDC balance) */
+  getProvider(): ethers.providers.JsonRpcProvider | null {
+    return this.provider;
+  }
+
   /** Full init: wallet + CLOB client with API credentials (calls CLOB server) */
   async initialize(): Promise<void> {
     if (this.client) return;

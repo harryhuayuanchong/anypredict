@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
+import { ethers } from "ethers";
 import { createServerClient } from "@/lib/supabase";
 import { getPolymarketAdapter } from "@/lib/trading/polymarket-adapter";
+
+const NATIVE_USDC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 
 /**
  * GET /api/trading/status
@@ -74,6 +78,24 @@ export async function GET() {
         const balance = await adapter.getBalance();
         status.balance_usdc = balance.usdc;
         status.wallet_address = balance.address;
+
+        // Also check native USDC balance (for convert button)
+        try {
+          const provider = adapter.getProvider();
+          if (provider && balance.address) {
+            const nativeUsdc = new ethers.Contract(
+              NATIVE_USDC,
+              ERC20_ABI,
+              provider
+            );
+            const nativeBal = await nativeUsdc.balanceOf(balance.address);
+            status.balance_native_usdc = parseFloat(
+              ethers.utils.formatUnits(nativeBal, 6)
+            );
+          }
+        } catch {
+          status.balance_native_usdc = null;
+        }
       } catch (balanceErr) {
         console.error("Balance fetch error:", balanceErr);
         status.balance_usdc = null;

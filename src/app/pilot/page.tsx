@@ -32,6 +32,7 @@ interface TradingStatus {
   recent_fills: number;
   recent_fills_usd: number;
   balance_usdc: number | null;
+  balance_native_usdc: number | null;
   wallet_address: string | null;
   balance_error?: string;
 }
@@ -182,7 +183,7 @@ export default function TradingPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Trading</h1>
+        <h1 className="text-2xl font-bold">Pilot</h1>
         <div className="flex gap-2">
           {openOrders.length > 0 && (
             <Button
@@ -213,22 +214,19 @@ export default function TradingPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Status
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  status?.configured ? "bg-green-500" : "bg-red-400"
+                }`}
+                title={status?.configured ? "Connected" : "Not configured"}
+              />
+              {status?.configured ? "Connected" : "Not Connected"}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2">
-              {status?.configured ? (
-                <Badge variant="default" className="bg-green-600">
-                  Connected
-                </Badge>
-              ) : (
-                <Badge variant="destructive">Not Configured</Badge>
-              )}
-            </div>
             {/* ── Dry Run / LIVE toggle ── */}
-            <div className="mt-3 flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <span
                 className={`text-sm font-medium ${
                   status?.dry_run ? "text-foreground" : "text-muted-foreground"
@@ -286,6 +284,13 @@ export default function TradingPage() {
                 {status.balance_error}
               </p>
             )}
+            {status?.balance_native_usdc != null &&
+              status.balance_native_usdc > 0.01 && (
+                <ConvertUsdcButton
+                  amount={status.balance_native_usdc}
+                  onDone={fetchData}
+                />
+              )}
           </CardContent>
         </Card>
 
@@ -747,6 +752,78 @@ function FundWalletCard({ address, balance }: { address: string; balance: number
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Convert native USDC → USDC.e via Relay ──
+
+function ConvertUsdcButton({
+  amount,
+  onDone,
+}: {
+  amount: number;
+  onDone: () => void;
+}) {
+  const [converting, setConverting] = useState(false);
+  const [result, setResult] = useState<{
+    success?: boolean;
+    received?: number;
+    error?: string;
+  } | null>(null);
+
+  const handleConvert = async () => {
+    setConverting(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/trading/convert", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setResult({ success: true, received: data.received });
+      onDone();
+    } catch (err) {
+      setResult({
+        error: err instanceof Error ? err.message : "Conversion failed",
+      });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  if (result?.success) {
+    return (
+      <p className="mt-2 text-xs text-green-600 font-medium">
+        Converted → ${result.received?.toFixed(2)} USDC.e
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="text-xs border-blue-300 text-blue-600">
+          ${amount.toFixed(2)} USDC
+        </Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-[11px]"
+          onClick={handleConvert}
+          disabled={converting}
+        >
+          {converting ? (
+            <span className="flex items-center gap-1">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Converting...
+            </span>
+          ) : (
+            "Convert → USDC.e"
+          )}
+        </Button>
+      </div>
+      {result?.error && (
+        <p className="text-[10px] text-destructive">{result.error}</p>
+      )}
+    </div>
   );
 }
 
