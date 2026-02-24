@@ -38,16 +38,16 @@ export default function RootLayout({
                 Events
               </Link>
               <Link href="/runs" className="hover:text-foreground transition-colors">
-                Runs
+                History
               </Link>
               <Link href="/backtest" className="hover:text-foreground transition-colors">
                 Backtest
               </Link>
               <Link href="/new" className="hover:text-foreground transition-colors">
-                New Analysis
+                Analysis
               </Link>
               <Link href="/trading" className="hover:text-foreground transition-colors">
-                Trading
+                Pilot
               </Link>
             </nav>
           </div>

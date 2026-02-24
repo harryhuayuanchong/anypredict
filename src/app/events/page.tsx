@@ -195,23 +195,34 @@ export default function EventsPage() {
         <div className="flex gap-1 ml-auto">
           <button
             onClick={() => setView("grid")}
-            className={`text-xs px-2 py-1 rounded border transition-colors ${
+            className={`p-1.5 rounded border transition-colors ${
               view === "grid"
                 ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted border-transparent"
+                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
             }`}
+            title="Grid view"
           >
-            Grid
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
           </button>
           <button
             onClick={() => setView("list")}
-            className={`text-xs px-2 py-1 rounded border transition-colors ${
+            className={`p-1.5 rounded border transition-colors ${
               view === "list"
                 ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted border-transparent"
+                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
             }`}
+            title="List view"
           >
-            List
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
           </button>
         </div>
       </div>

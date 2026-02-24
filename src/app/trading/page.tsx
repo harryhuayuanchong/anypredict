@@ -6,6 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { TradeOrder } from "@/lib/trading/types";
 
 interface TradingStatus {
@@ -32,6 +43,8 @@ export default function TradingPage() {
   const [error, setError] = useState<string | null>(null);
   const [setupLoading, setSetupLoading] = useState(false);
   const [cancellingAll, setCancellingAll] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [showLiveConfirm, setShowLiveConfirm] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -110,6 +123,49 @@ export default function TradingPage() {
     }
   };
 
+  // Toggle dry-run mode
+  const handleModeToggle = (checked: boolean) => {
+    const goingLive = checked; // checked=ON means LIVE mode
+    if (goingLive) {
+      // Switching to LIVE → show confirmation dialog
+      setShowLiveConfirm(true);
+    } else {
+      // Switching back to Dry Run → no confirmation needed
+      applyModeChange(true);
+    }
+  };
+
+  const applyModeChange = async (dryRun: boolean) => {
+    setToggling(true);
+    // Optimistic UI
+    const prevDryRun = status?.dry_run;
+    if (status) setStatus({ ...status, dry_run: dryRun });
+
+    try {
+      const res = await fetch("/api/trading/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dry_run: dryRun, confirm: !dryRun }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Sync with server state
+      if (status) setStatus({ ...status, dry_run: data.dry_run });
+    } catch (err) {
+      // Rollback on error
+      if (status && prevDryRun !== undefined)
+        setStatus({ ...status, dry_run: prevDryRun });
+      setError(err instanceof Error ? err.message : "Mode switch failed");
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const confirmGoLive = () => {
+    setShowLiveConfirm(false);
+    applyModeChange(false);
+  };
+
   if (loading) {
     return (
       <div className="py-12 text-center text-muted-foreground">
@@ -170,14 +226,40 @@ export default function TradingPage() {
               ) : (
                 <Badge variant="destructive">Not Configured</Badge>
               )}
-              {status?.dry_run ? (
-                <Badge variant="secondary">Dry Run</Badge>
-              ) : (
-                <Badge variant="default" className="bg-orange-600">
-                  LIVE
-                </Badge>
+            </div>
+            {/* ── Dry Run / LIVE toggle ── */}
+            <div className="mt-3 flex items-center gap-3">
+              <span
+                className={`text-sm font-medium ${
+                  status?.dry_run ? "text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                Dry Run
+              </span>
+              <Switch
+                checked={!status?.dry_run}
+                onCheckedChange={handleModeToggle}
+                disabled={toggling || !status?.configured}
+                className="data-[state=checked]:bg-orange-600"
+              />
+              <span
+                className={`text-sm font-medium ${
+                  !status?.dry_run ? "text-orange-600" : "text-muted-foreground"
+                }`}
+              >
+                LIVE
+              </span>
+              {toggling && (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  Switching...
+                </span>
               )}
             </div>
+            {!status?.dry_run && (
+              <p className="mt-1.5 text-[10px] text-orange-600 font-medium">
+                Real money orders will be placed on Polymarket
+              </p>
+            )}
             {status?.wallet_address && (
               <WalletAddress address={status.wallet_address} />
             )}
@@ -479,6 +561,50 @@ export default function TradingPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ═══ Live Mode Confirmation Dialog ═══ */}
+      <AlertDialog open={showLiveConfirm} onOpenChange={setShowLiveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch to LIVE trading?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  You are about to enable <strong>LIVE</strong> trading mode.
+                  Real money orders will be submitted to Polymarket.
+                </p>
+                <div className="rounded-md bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 p-3 text-sm">
+                  <p className="font-medium text-orange-800 dark:text-orange-300">
+                    Current safeguards:
+                  </p>
+                  <ul className="mt-1 list-disc list-inside text-orange-700 dark:text-orange-400 text-xs space-y-0.5">
+                    <li>Max position: ${status?.max_position_usd || 50} per order</li>
+                    <li>Max total exposure: ${status?.max_total_exposure_usd || 500}</li>
+                    <li>
+                      Balance: {status?.balance_usdc != null
+                        ? `$${status.balance_usdc.toFixed(2)}`
+                        : "unknown"}
+                    </li>
+                  </ul>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  This change is temporary and will revert to Dry Run on server
+                  restart.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmGoLive}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              Enable LIVE Trading
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
