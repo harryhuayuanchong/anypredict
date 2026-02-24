@@ -8,6 +8,7 @@ Currently supports **weather markets**, with geopolitics, sports, and politics c
 
 ## Table of Contents
 
+- [Strategy](#strategy)
 - [Features](#features)
 - [Architecture Overview](#architecture-overview)
 - [Project Structure](#project-structure)
@@ -21,6 +22,73 @@ Currently supports **weather markets**, with geopolitics, sports, and politics c
 - [Visualizations](#visualizations)
 - [Setup](#setup)
 - [Tech Stack](#tech-stack)
+
+---
+
+## Strategy
+
+### Weather Forecast Edge Trading on Polymarket
+
+AnyPredict runs a **quantitative edge-detection strategy** for binary weather prediction markets. The core thesis: *we have better weather forecasts than the average Polymarket trader.*
+
+### The Setup
+
+Polymarket lists weather events like *"What will be the highest temperature in NYC on Feb 24?"* with multiple sub-markets (temperature buckets): "25°F or below", "26-27°F", "28-29°F", ..., "40°F or higher". Each bucket trades as a binary YES/NO contract where the YES price reflects the crowd's implied probability.
+
+### How the Strategy Finds Edge
+
+**1. Build a Superior Probability Model**
+
+The system fetches **~82 ensemble members** from two independent numerical weather prediction models — ECMWF IFS (51 members) and GFS (31 members). Each member is a slightly perturbed simulation of the atmosphere, producing a different daily max temperature prediction for the target date.
+
+For a market like "40°F or higher", the system counts how many of the 82 members produce a daily max >= 40°F, with Laplace smoothing:
+
+```
+model_prob = (members_above_40F + 1) / (82 + 2)
+```
+
+This is an **empirical probability** from real forecast distributions — no Gaussian assumptions. If 70 out of 82 members say >= 40°F, that's ~84.5% true probability.
+
+**2. Compare Model vs. Market**
+
+The market's implied probability is simply the YES price (YES at 72¢ = market thinks 72% chance). The edge is:
+
+```
+edge = model_prob - market_implied_prob - fees - slippage
+```
+
+- **Positive edge** → Model says YES is more likely than the market thinks → **BUY YES**
+- **Negative edge** → Model says YES is less likely → **BUY NO**
+- **Small edge** → Not enough signal → **NO TRADE**
+
+**3. Size with Kelly Criterion**
+
+Once an edge is found, the [Kelly Criterion](https://en.wikipedia.org/wiki/Kelly_criterion) determines the mathematically optimal bet size. The system uses **half-Kelly** (50% of optimal) for conservative risk management, further scaled by a user confidence parameter:
+
+```
+suggested_size = bankroll × kelly_fraction × 0.5 × (confidence / 100)
+```
+
+**4. Scan All Markets, Pick the Best**
+
+For an event with 15+ temperature buckets, the strategy analyzes **all of them at once** against the same weather data (fetched once). This reveals the single best trade — typically a **BUY NO on a tail bucket** where the crowd is overpricing an unlikely extreme outcome.
+
+A conviction score (0-100%) ranks opportunities by combining edge strength, Kelly fraction, model agreement (do ECMWF and GFS agree?), ensemble spread, and probability method quality.
+
+**5. Validate with Backtesting**
+
+After market resolution, the system fetches actual observed temperatures and computes realized P&L to measure real strategy performance over time.
+
+### Where the Alpha Lives
+
+The most common profitable pattern is **BUY NO on tail temperature buckets**. Prediction market participants tend to overprice extreme weather outcomes (very hot or very cold), while the ensemble models correctly assign low probability to these tails. The strategy systematically harvests this behavioral bias.
+
+### What This Strategy Is NOT
+
+- **Not** momentum, technical analysis, or market-making
+- **Not** factoring order book depth or market microstructure
+- **Not** a black box — every trade has transparent rationale, assumptions, and invalidation conditions
+- Currently **weather-only** (temperature markets), with the architecture designed to extend to other prediction market domains
 
 ---
 
