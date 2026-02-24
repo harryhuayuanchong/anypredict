@@ -72,6 +72,26 @@ export async function POST(request: NextRequest) {
         // fallback to defaults
       }
 
+      // Parse CLOB token IDs for trading
+      let clobYes: string | null = null;
+      let clobNo: string | null = null;
+      try {
+        if (m.clobTokenIds) {
+          const tokenIds =
+            typeof m.clobTokenIds === "string"
+              ? JSON.parse(m.clobTokenIds)
+              : m.clobTokenIds;
+          if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
+            clobYes = tokenIds[0] || null;
+            clobNo = tokenIds[1] || null;
+          }
+        }
+      } catch {
+        // token IDs not available
+      }
+
+      const conditionId = m.conditionId || null;
+
       if (parsed) {
         subMarkets.push({
           id: m.id || m.conditionId || "",
@@ -87,6 +107,9 @@ export async function POST(request: NextRequest) {
           label: parsed.label,
           liquidity: parseFloat(m.liquidity) || 0,
           volume: parseFloat(m.volume) || 0,
+          clob_token_id_yes: clobYes,
+          clob_token_id_no: clobNo,
+          condition_id: conditionId,
         });
       } else {
         // Include even if we can't parse temps — user can fill manually
@@ -104,6 +127,9 @@ export async function POST(request: NextRequest) {
           label: question,
           liquidity: parseFloat(m.liquidity) || 0,
           volume: parseFloat(m.volume) || 0,
+          clob_token_id_yes: clobYes,
+          clob_token_id_no: clobNo,
+          condition_id: conditionId,
         });
       }
     }
@@ -125,6 +151,7 @@ export async function POST(request: NextRequest) {
       city: cityInfo?.city || null,
       lat: cityInfo?.lat || null,
       lon: cityInfo?.lon || null,
+      neg_risk: !!event.negRisk,
       sub_markets: subMarkets,
       raw_event: {
         id: event.id,

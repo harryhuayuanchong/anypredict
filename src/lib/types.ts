@@ -46,6 +46,12 @@ export interface WeatherStrategyRun {
   batch_id: string | null;
   event_slug: string | null;
 
+  // CLOB trading identifiers
+  clob_token_id_yes: string | null;
+  clob_token_id_no: string | null;
+  condition_id: string | null;
+  neg_risk: boolean;
+
   // Backtest
   actual_temp: number | null;
   resolved_yes: boolean | null;
@@ -154,6 +160,9 @@ export interface SubMarketInput {
   yes_price: number;
   no_price: number;
   label: string;
+  clob_token_id_yes?: string;
+  clob_token_id_no?: string;
+  condition_id?: string;
 }
 
 export interface BatchComputeInput {
@@ -175,6 +184,9 @@ export interface BatchComputeInput {
   forecast_source: string;
   time_window_hours: number;
   min_edge: number;
+
+  // Event-level flags
+  neg_risk?: boolean;
 
   // Per-sub-market data
   sub_markets: SubMarketInput[];
@@ -212,4 +224,111 @@ export interface SingleModelResult {
   members: number[];
   model: string;
   member_count: number;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Strategy backtest types
+   ═══════════════════════════════════════════════════════ */
+
+export interface BacktestOutput {
+  config: StrategyBacktestConfig;
+  computedAt: string;
+  scenarios: ScenarioResult[];
+}
+
+export interface StrategyBacktestConfig {
+  start: string;
+  end: string;
+  cities: string[];
+  baseSize: number;
+  feeBps: number;
+  slippageBps: number;
+  minEdge: number;
+  confidence: number;
+}
+
+export interface ScenarioResult {
+  name: string;
+  description: string;
+  metrics: ScenarioMetrics;
+  dailyPnl: DailyPnl[];
+  monthlyPnl: MonthlyPnl[];
+  cityBreakdown: CityBreakdown[];
+  tradeTypeBreakdown: TradeTypeBreakdown[];
+  calibration: CalibrationBucket[];
+  edgeHistogram: EdgeHistogramBucket[];
+}
+
+export interface ScenarioMetrics {
+  totalPnl: number;
+  totalInvested: number;
+  roi: number;
+  winRate: number;
+  wins: number;
+  losses: number;
+  totalTrades: number;
+  avgEdge: number;
+  avgPnlPerTrade: number;
+  sharpe: number;
+  maxDrawdown: number;
+  profitFactor: number;
+  longestLosingStreak: number;
+  bestTrade: { pnl: number; city: string; date: string; side: string; bucket: string };
+  worstTrade: { pnl: number; city: string; date: string; side: string; bucket: string };
+}
+
+export interface DailyPnl {
+  date: string;
+  pnl: number;
+  cumulative: number;
+}
+
+export interface MonthlyPnl {
+  month: string;
+  pnl: number;
+  cumulative: number;
+  winRate: number;
+  trades: number;
+}
+
+export interface CityBreakdown {
+  city: string;
+  pnl: number;
+  winRate: number;
+  trades: number;
+}
+
+export interface TradeTypeBreakdown {
+  side: "BUY_YES" | "BUY_NO";
+  pnl: number;
+  winRate: number;
+  trades: number;
+  avgEdge: number;
+}
+
+export interface CalibrationBucket {
+  label: string;
+  predicted: number;
+  actual: number;
+  count: number;
+}
+
+export interface EdgeHistogramBucket {
+  label: string;
+  count: number;
+}
+
+export interface StrategyTradeResult {
+  date: string;
+  city: string;
+  bucket_label: string;
+  side: "BUY_YES" | "BUY_NO";
+  model_prob: number;
+  market_price: number;
+  edge: number;
+  kelly: number;
+  size_usd: number;
+  resolved_yes: boolean;
+  pnl: number;
+  won: boolean;
 }

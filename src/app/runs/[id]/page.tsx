@@ -10,6 +10,7 @@ import { AiSummaryButton } from "./ai-summary-button";
 import { AiSummaryContent } from "./ai-summary-content";
 import { BacktestSection } from "./backtest-section";
 import { ForecastChartSection } from "./forecast-chart-section";
+import { TradeSection } from "./trade-section";
 
 export const dynamic = "force-dynamic";
 
@@ -376,6 +377,9 @@ export default async function RunDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {/* ═══ Trade Execution ═══ */}
+      <TradeSection runId={r.id} recommendation={r.recommendation} />
 
       {/* ═══ Multi-Model Ensemble ═══ */}
       {r.forecast_snapshot?.ensemble_members && r.forecast_snapshot.ensemble_members.length > 0 && (

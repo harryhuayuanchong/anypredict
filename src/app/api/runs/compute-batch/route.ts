@@ -52,6 +52,10 @@ export async function POST(request: NextRequest) {
       trade_plan: results[i].trade_plan,
       batch_id,
       event_slug: body.event_slug,
+      clob_token_id_yes: sm.clob_token_id_yes || null,
+      clob_token_id_no: sm.clob_token_id_no || null,
+      condition_id: sm.condition_id || null,
+      neg_risk: body.neg_risk ?? false,
     }));
 
     const { data, error } = await supabase

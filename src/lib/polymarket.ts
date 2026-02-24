@@ -188,6 +188,10 @@ export interface ParsedSubMarket {
   label: string;
   liquidity: number;
   volume: number;
+  // CLOB trading identifiers
+  clob_token_id_yes: string | null;
+  clob_token_id_no: string | null;
+  condition_id: string | null;
 }
 
 /** Full extracted event info */
@@ -201,6 +205,7 @@ export interface ExtractedEvent {
   city: string | null;
   lat: number | null;
   lon: number | null;
+  neg_risk: boolean;
   sub_markets: ParsedSubMarket[];
   raw_event: Record<string, unknown>;
 }

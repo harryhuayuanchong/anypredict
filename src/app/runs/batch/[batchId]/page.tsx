@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import type { WeatherStrategyRun, TradePlan, ForecastSnapshot } from "@/lib/types";
 import { RefreshBatchButton } from "./refresh-button";
+import { TradeControls, TradeButton } from "./trade-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -298,6 +299,12 @@ export default async function BatchPage({
         </CardContent>
       </Card>
 
+      {/* ═══ Trading Controls ═══ */}
+      <TradeControls
+        batchId={batchId}
+        runIds={sortedRuns.map((r) => r.id)}
+      />
+
       {/* Best Opportunity Cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         {bestNo && (
@@ -475,6 +482,7 @@ export default async function BatchPage({
                 <TableHead className="text-right">Edge</TableHead>
                 <TableHead className="text-center">Signal</TableHead>
                 <TableHead className="text-right">Kelly Size</TableHead>
+                <TableHead className="text-center">Trade</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -537,6 +545,13 @@ export default async function BatchPage({
                       {tp?.suggested_size_usd
                         ? `$${tp.suggested_size_usd.toFixed(2)}`
                         : "—"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {(isNo || isYes) ? (
+                        <TradeButton runId={run.id} batchId={batchId} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Link href={`/runs/${run.id}`}>

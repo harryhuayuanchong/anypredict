@@ -191,6 +191,7 @@ function NewRunPageInner() {
           forecast_source: form.forecast_source,
           time_window_hours: parseInt(form.time_window_hours) || 3,
           min_edge: parseFloat(form.min_edge) || 0.05,
+          neg_risk: extractedEvent.neg_risk,
           sub_markets: extractedEvent.sub_markets.map((sm) => ({
             id: sm.id,
             question: sm.question,
@@ -200,6 +201,9 @@ function NewRunPageInner() {
             yes_price: sm.yes_price,
             no_price: sm.no_price,
             label: sm.label,
+            clob_token_id_yes: sm.clob_token_id_yes,
+            clob_token_id_no: sm.clob_token_id_no,
+            condition_id: sm.condition_id,
           })),
         }),
       });
