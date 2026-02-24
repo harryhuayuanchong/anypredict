@@ -39,6 +39,13 @@ function getEnv(key: string, fallback?: string): string {
   return val || fallback || "";
 }
 
+/** Resolve Polygon RPC URL: POLYMARKET_RPC_URL > DRPC > public fallback */
+function resolveRpcUrl(): string {
+  if (process.env.POLYMARKET_RPC_URL) return process.env.POLYMARKET_RPC_URL;
+  if (process.env.DRPC_API_KEY) return `https://lb.drpc.live/polygon/${process.env.DRPC_API_KEY}`;
+  return "https://polygon-bor-rpc.publicnode.com";
+}
+
 export class PolymarketAdapter implements TradingPlatformAdapter {
   readonly platform = "polymarket";
 
@@ -56,13 +63,16 @@ export class PolymarketAdapter implements TradingPlatformAdapter {
 
     const privateKey = getEnv("POLYMARKET_PRIVATE_KEY");
     const chainId = parseInt(getEnv("POLYMARKET_CHAIN_ID", "137"));
-    const rpcUrl = getEnv(
-      "POLYMARKET_RPC_URL",
-      "https://polygon-bor-rpc.publicnode.com"
-    );
+    const rpcUrl = resolveRpcUrl();
 
-    // Pass full network object so ethers v5 skips eth_chainId auto-detect
-    this.provider = new ethers.providers.JsonRpcProvider(rpcUrl, {
+    // Use StaticJsonRpcProvider to skip eth_chainId auto-detect.
+    // Pass ConnectionInfo with skipFetchSetup so ethers v5 doesn't clash
+    // with Next.js patched fetch (which adds caching headers / alters responses).
+    const connection: ethers.utils.ConnectionInfo = {
+      url: rpcUrl,
+      skipFetchSetup: true,
+    };
+    this.provider = new ethers.providers.StaticJsonRpcProvider(connection, {
       chainId,
       name: "matic",
     });
@@ -252,7 +262,7 @@ let _instanceRpc: string | undefined;
 
 export function getPolymarketAdapter(): PolymarketAdapter {
   // In dev, recreate if RPC env changed (e.g. after .env.local edit)
-  const currentRpc = process.env.POLYMARKET_RPC_URL;
+  const currentRpc = resolveRpcUrl();
   if (!_instance || _instanceRpc !== currentRpc) {
     _instance = new PolymarketAdapter();
     _instanceRpc = currentRpc;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -152,7 +153,7 @@ export default function TradingPage() {
         </div>
       )}
 
-      {/* ═══ Status Card ═══ */}
+      {/* ═══ Status + Wallet ═══ */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -178,9 +179,7 @@ export default function TradingPage() {
               )}
             </div>
             {status?.wallet_address && (
-              <p className="mt-2 text-xs text-muted-foreground font-mono truncate">
-                {status.wallet_address}
-              </p>
+              <WalletAddress address={status.wallet_address} />
             )}
           </CardContent>
         </Card>
@@ -188,7 +187,7 @@ export default function TradingPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              USDC Balance
+              USDC.e Balance
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -196,6 +195,9 @@ export default function TradingPage() {
               {status?.balance_usdc != null
                 ? `$${status.balance_usdc.toFixed(2)}`
                 : "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Polygon &middot; USDC.e (Bridged)
             </p>
             {status?.balance_error && (
               <p className="text-xs text-destructive mt-1">
@@ -238,6 +240,11 @@ export default function TradingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ═══ Fund Wallet ═══ */}
+      {status?.wallet_address && (
+        <FundWalletCard address={status.wallet_address} balance={status.balance_usdc} />
+      )}
 
       {/* ═══ Config Summary ═══ */}
       <Card>
@@ -473,6 +480,147 @@ export default function TradingPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ── Wallet Address (abbreviated + copy) ──
+
+function WalletAddress({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const abbreviated = `${address.slice(0, 6)}...${address.slice(-4)}`;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="mt-2 flex items-center gap-1.5">
+      <span className="text-xs font-mono text-muted-foreground">{abbreviated}</span>
+      <button
+        onClick={handleCopy}
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        title="Copy full address"
+      >
+        {copied ? (
+          <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" strokeWidth={2} />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
+// ── Fund Wallet Card (QR + chain info) ──
+
+function FundWalletCard({ address, balance }: { address: string; balance: number | null }) {
+  const [showQR, setShowQR] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const abbreviated = `${address.slice(0, 6)}...${address.slice(-4)}`;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          Fund Wallet
+          {balance != null && balance < 1 && (
+            <Badge variant="destructive" className="text-xs">Needs Funding</Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col sm:flex-row gap-6">
+          {/* Left: Instructions */}
+          <div className="flex-1 space-y-3">
+            <div className="rounded-md bg-muted/50 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
+                  <span className="text-[10px] font-bold text-white">P</span>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Polygon (PoS) Chain</p>
+                  <p className="text-[10px] text-muted-foreground">Chain ID: 137</p>
+                </div>
+              </div>
+              <Separator />
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-[10px] font-bold text-white">$</span>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">USDC.e (Bridged USDC)</p>
+                  <p className="text-[10px] text-muted-foreground font-mono">0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174</p>
+                </div>
+              </div>
+              <Separator />
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-full bg-gray-400 flex items-center justify-center flex-shrink-0">
+                  <span className="text-[10px] font-bold text-white">G</span>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">MATIC / POL (for gas)</p>
+                  <p className="text-[10px] text-muted-foreground">~0.1 POL is enough for many txs</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Address with copy */}
+            <div className="flex items-center gap-2 rounded-md border p-2.5">
+              <span className="text-xs font-mono flex-1 truncate">{address}</span>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCopy}>
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Send <strong className="text-foreground">USDC.e</strong> and a small amount of <strong className="text-foreground">POL</strong> (for gas)
+              to the address above on the <strong className="text-foreground">Polygon</strong> network.
+              Do NOT send tokens on other chains (Ethereum, Arbitrum, etc.) — they will be lost.
+            </p>
+          </div>
+
+          {/* Right: QR Code */}
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={() => setShowQR((v) => !v)}
+              className="text-xs text-muted-foreground hover:text-foreground underline sm:hidden"
+            >
+              {showQR ? "Hide QR" : "Show QR Code"}
+            </button>
+            <div className={`${showQR ? "block" : "hidden"} sm:block`}>
+              <div className="p-3 bg-white rounded-lg border">
+                <QRCodeSVG
+                  value={address}
+                  size={140}
+                  level="M"
+                  includeMargin={false}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center mt-1.5 font-mono">
+                {abbreviated}
+              </p>
+              <p className="text-[10px] text-center text-muted-foreground">
+                Polygon only
+              </p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

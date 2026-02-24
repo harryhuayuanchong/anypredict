@@ -7,7 +7,9 @@ if (!pk) {
   process.exit(1);
 }
 
-const rpc = process.env.POLYMARKET_RPC_URL || "https://polygon-bor-rpc.publicnode.com";
+const rpc = process.env.POLYMARKET_RPC_URL
+  || (process.env.DRPC_API_KEY ? `https://lb.drpc.live/polygon/${process.env.DRPC_API_KEY}` : null)
+  || "https://polygon-bor-rpc.publicnode.com";
 const chainId = parseInt(process.env.POLYMARKET_CHAIN_ID || "137");
 const provider = new ethers.providers.JsonRpcProvider(rpc, chainId);
 const wallet = new ethers.Wallet(pk, provider);
