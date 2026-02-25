@@ -52,8 +52,13 @@ export interface WeatherStrategyRun {
   condition_id: string | null;
   neg_risk: boolean;
 
+  // Weather metric (multi-category support)
+  weather_metric: string | null; // "temperature" | "snowfall" | "rainfall" | "wind_speed" | "earthquake_magnitude"
+  weather_unit: string | null; // "°C" | "cm" | "mm" | "km/h" | "M"
+
   // Backtest
   actual_temp: number | null;
+  actual_value: number | null; // generic version (for non-temperature metrics)
   resolved_yes: boolean | null;
   pnl: number | null;
   backtested_at: string | null;
@@ -69,6 +74,11 @@ export interface ForecastSnapshot {
   forecast_temp: number;
   forecast_temp_min: number | null;
   forecast_temp_max: number | null;
+
+  // Generic value fields (for non-temperature metrics)
+  forecast_value?: number | null; // daily aggregate of target metric
+  hourly_values?: number[] | null; // generic hourly values
+  weather_metric?: string | null; // which metric this snapshot contains
 
   // Ensemble data (combined pool of all models)
   ensemble_members?: number[];       // daily-max temp per ensemble member (all models pooled)
@@ -127,6 +137,7 @@ export interface ComputeInput {
   forecast_source: string;
   time_window_hours: number;
   min_edge: number;
+  weather_metric?: string; // defaults to "temperature"
 }
 
 export interface ComputeResult {
@@ -188,6 +199,9 @@ export interface BatchComputeInput {
   // Event-level flags
   neg_risk?: boolean;
 
+  // Weather metric (multi-category)
+  weather_metric?: string; // defaults to "temperature"
+
   // Per-sub-market data
   sub_markets: SubMarketInput[];
 }
@@ -245,6 +259,8 @@ export interface StrategyBacktestConfig {
   slippageBps: number;
   minEdge: number;
   confidence: number;
+  metric?: string;
+  unit?: string;
 }
 
 export interface ScenarioResult {

@@ -1,27 +1,72 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import type { WeatherStrategyRun, TradePlan } from "@/lib/types";
+import {
+  type WeatherVariableConfig,
+  WEATHER_CONFIGS,
+  getConfigForMetric,
+} from "@/lib/weather-config";
+import { fetchHistoricalEarthquakes } from "@/lib/earthquake";
+import { fetchActualGistempAnomaly, resolveMonthFromTitle, resolveYearFromTitle } from "@/lib/gistemp";
 
 /**
- * Fetch actual historical temperature from Open-Meteo Archive API.
- * Returns the daily max temperature for the resolution date at the location.
- * (Polymarket weather markets typically resolve on "highest temperature of the day")
+ * Fetch actual historical value from Open-Meteo Archive API or USGS.
+ * Returns the daily aggregated value for the resolution date at the location.
  */
-async function fetchActualTemperature(
+async function fetchActualValue(
   lat: number,
   lon: number,
-  dateStr: string
-): Promise<{ temp_max: number; temp_min: number; hourly_temps: number[]; hourly_times: string[] }> {
+  dateStr: string,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature,
+  eventTitle: string = ""
+): Promise<{ actual_value: number; hourly_values: number[]; hourly_times: string[] }> {
   const date = new Date(dateStr);
   const dayStr = date.toISOString().split("T")[0];
+
+  // NASA GISS GISTEMP: fetch published anomaly for the target month/year
+  if (config.dataSource === "nasa-giss") {
+    const month = eventTitle ? resolveMonthFromTitle(eventTitle) : "Jan";
+    const year = eventTitle ? resolveYearFromTitle(eventTitle) : date.getFullYear();
+    const anomaly = await fetchActualGistempAnomaly(year, month);
+    if (anomaly == null) {
+      throw new Error(`NASA GISS anomaly for ${month} ${year} not yet published. Data is typically released 1-2 months after the target month.`);
+    }
+    return {
+      actual_value: anomaly,
+      hourly_values: [anomaly],
+      hourly_times: [`${year}-${String(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].indexOf(month) + 1).padStart(2, "0")}-01`],
+    };
+  }
+
+  // Earthquake: query USGS for actual events on that date
+  if (config.dataSource === "usgs") {
+    const nextDay = new Date(date.getTime() + 86400000);
+    const nextDayStr = nextDay.toISOString().split("T")[0];
+    const events = await fetchHistoricalEarthquakes(lat, lon, 250, 1);
+    // Filter to the specific day
+    const dayEvents = events.filter((e) => {
+      const eDate = new Date(e.time).toISOString().split("T")[0];
+      return eDate >= dayStr && eDate < nextDayStr;
+    });
+    const maxMag = dayEvents.length > 0 ? Math.max(...dayEvents.map((e) => e.magnitude)) : 0;
+    return {
+      actual_value: maxMag,
+      hourly_values: dayEvents.map((e) => e.magnitude),
+      hourly_times: dayEvents.map((e) => new Date(e.time).toISOString()),
+    };
+  }
+
+  // Open-Meteo Archive API
+  const archiveDaily = config.archiveDailyVar;
+  const archiveHourly = config.archiveHourlyVar ?? config.forecastHourlyVar;
 
   const url = new URL("https://archive-api.open-meteo.com/v1/archive");
   url.searchParams.set("latitude", lat.toString());
   url.searchParams.set("longitude", lon.toString());
   url.searchParams.set("start_date", dayStr);
   url.searchParams.set("end_date", dayStr);
-  url.searchParams.set("daily", "temperature_2m_max,temperature_2m_min");
-  url.searchParams.set("hourly", "temperature_2m");
+  url.searchParams.set("daily", archiveDaily);
+  url.searchParams.set("hourly", archiveHourly);
   url.searchParams.set("timezone", "auto");
 
   const res = await fetch(url.toString());
@@ -31,17 +76,15 @@ async function fetchActualTemperature(
 
   const data = await res.json();
 
-  const tempMax = data.daily?.temperature_2m_max?.[0];
-  const tempMin = data.daily?.temperature_2m_min?.[0];
+  const actualValue = data.daily?.[archiveDaily]?.[0];
 
-  if (tempMax == null) {
-    throw new Error("No historical temperature data available for this date. Data may not be available yet (usually 5+ days delay).");
+  if (actualValue == null) {
+    throw new Error(`No historical ${config.metric} data available for this date. Data may not be available yet (usually 5+ days delay).`);
   }
 
   return {
-    temp_max: tempMax,
-    temp_min: tempMin,
-    hourly_temps: data.hourly?.temperature_2m ?? [],
+    actual_value: actualValue,
+    hourly_values: data.hourly?.[archiveHourly] ?? [],
     hourly_times: data.hourly?.time ?? [],
   };
 }
@@ -160,15 +203,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch actual historical temperature
-    const actual = await fetchActualTemperature(r.lat, r.lon, r.resolution_time);
+    // Derive config from run's weather_metric (defaults to temperature for legacy runs)
+    const config = getConfigForMetric(r.weather_metric ?? "temperature");
 
-    // Use daily max (Polymarket weather = "highest temperature")
-    const actualTemp = actual.temp_max;
+    // Fetch actual historical value
+    const actual = await fetchActualValue(r.lat, r.lon, r.resolution_time, config, r.market_title);
+    const actualValue = actual.actual_value;
 
     // Resolve the market
     const resolvedYes = resolveMarket(
-      actualTemp,
+      actualValue,
       r.rule_type,
       r.threshold_low,
       r.threshold_high
@@ -186,35 +230,58 @@ export async function POST(request: NextRequest) {
       r.slippage_bps
     );
 
-    // Save to DB
+    // Save to DB — try with new column, fall back without if migration not applied
+    const updateFields = {
+      actual_temp: actualValue, // backward compat column
+      actual_value: actualValue,
+      resolved_yes: resolvedYes,
+      pnl,
+      backtested_at: new Date().toISOString(),
+    };
+
     const { error: updateError } = await supabase
       .from("weather_strategy_runs")
-      .update({
-        actual_temp: actualTemp,
-        resolved_yes: resolvedYes,
-        pnl,
-        backtested_at: new Date().toISOString(),
-      })
+      .update(updateFields)
       .eq("id", run_id);
 
-    if (updateError) {
+    if (updateError && updateError.message?.includes("actual_value")) {
+      // Migration not applied — strip new column and retry
+      console.warn("actual_value column missing, updating without it. Run migration_005_weather_metric.sql.");
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { actual_value, ...fallbackFields } = updateFields;
+      const { error: e2 } = await supabase
+        .from("weather_strategy_runs")
+        .update(fallbackFields)
+        .eq("id", run_id);
+      if (e2) {
+        return NextResponse.json(
+          { error: `Failed to save backtest: ${e2.message}` },
+          { status: 500 }
+        );
+      }
+    } else if (updateError) {
       return NextResponse.json(
         { error: `Failed to save backtest: ${updateError.message}` },
         { status: 500 }
       );
     }
 
-    const forecastTemp = r.forecast_snapshot?.forecast_temp ?? null;
+    const forecastValue = r.forecast_snapshot?.forecast_value ?? r.forecast_snapshot?.forecast_temp ?? null;
 
     return NextResponse.json({
-      actual_temp: actualTemp,
+      actual_temp: actualValue, // backward compat
+      actual_value: actualValue,
+      weather_metric: r.weather_metric ?? "temperature",
+      weather_unit: config.primaryUnit,
       resolved_yes: resolvedYes,
       pnl,
-      forecast_temp: forecastTemp,
-      forecast_error: forecastTemp != null ? Math.round((actualTemp - forecastTemp) * 10) / 10 : null,
+      forecast_temp: forecastValue, // backward compat
+      forecast_value: forecastValue,
+      forecast_error: forecastValue != null ? Math.round((actualValue - forecastValue) * 10) / 10 : null,
       actual_hourly: {
         times: actual.hourly_times,
-        temps: actual.hourly_temps,
+        temps: actual.hourly_values, // backward compat key name
+        values: actual.hourly_values,
       },
     });
   } catch (err) {

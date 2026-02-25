@@ -34,6 +34,17 @@ export default async function RunDetailPage({
   const r = run as WeatherStrategyRun;
   const tp = r.trade_plan as TradePlan | null;
 
+  // Derive display unit from weather_metric
+  const METRIC_UNITS: Record<string, string> = {
+    temperature: "°C",
+    snowfall: "cm",
+    rainfall: "mm",
+    wind_speed: "km/h",
+    earthquake_magnitude: "M",
+    climate_anomaly: "°C",
+  };
+  const unit = METRIC_UNITS[r.weather_metric ?? "temperature"] ?? "°C";
+
   const isPast = new Date(r.resolution_time) < new Date();
 
   // Data age calculation
@@ -60,9 +71,9 @@ export default async function RunDetailPage({
   const ruleDesc =
     r.rule_type === "above_below"
       ? r.threshold_low != null && r.threshold_high == null
-        ? `temp >= ${r.threshold_low} C`
-        : `temp <= ${r.threshold_high} C`
-      : `${r.threshold_low} C - ${r.threshold_high} C`;
+        ? `≥ ${r.threshold_low} ${unit}`
+        : `≤ ${r.threshold_high} ${unit}`
+      : `${r.threshold_low}–${r.threshold_high} ${unit}`;
 
   // Edge strength label
   const absEdge = Math.abs(r.edge ?? 0) * 100;
@@ -406,20 +417,20 @@ export default async function RunDetailPage({
             {/* Combined stats */}
             <div className="grid gap-4 sm:grid-cols-4">
               <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 p-3 text-center">
-                <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">P10 (cold)</p>
-                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p10}&#176;C</p>
+                <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">P10 (low)</p>
+                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p10} {unit}</p>
               </div>
               <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3 text-center">
                 <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">P50 (median)</p>
-                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p50}&#176;C</p>
+                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p50} {unit}</p>
               </div>
               <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 p-3 text-center">
-                <p className="text-[10px] font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wide">P90 (warm)</p>
-                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p90}&#176;C</p>
+                <p className="text-[10px] font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wide">P90 (high)</p>
+                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_p90} {unit}</p>
               </div>
               <div className="rounded-lg bg-purple-50 dark:bg-purple-950/30 p-3 text-center">
                 <p className="text-[10px] font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide">Spread (&#963;)</p>
-                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_std}&#176;C</p>
+                <p className="font-mono text-xl font-bold mt-0.5">{r.forecast_snapshot.ensemble_std} {unit}</p>
               </div>
             </div>
 
@@ -447,9 +458,9 @@ export default async function RunDetailPage({
                             {label}
                           </div>
                           <div className={`px-3 py-2 text-right font-mono text-muted-foreground ${i > 0 ? "border-t" : ""}`}>{m.member_count}</div>
-                          <div className={`px-3 py-2 text-right font-mono ${i > 0 ? "border-t" : ""}`}>{m.p50}&#176;C</div>
-                          <div className={`px-3 py-2 text-right font-mono ${i > 0 ? "border-t" : ""}`}>{m.std}&#176;C</div>
-                          <div className={`px-3 py-2 text-right font-mono text-muted-foreground ${i > 0 ? "border-t" : ""}`}>{m.p10} - {m.p90}&#176;C</div>
+                          <div className={`px-3 py-2 text-right font-mono ${i > 0 ? "border-t" : ""}`}>{m.p50} {unit}</div>
+                          <div className={`px-3 py-2 text-right font-mono ${i > 0 ? "border-t" : ""}`}>{m.std} {unit}</div>
+                          <div className={`px-3 py-2 text-right font-mono text-muted-foreground ${i > 0 ? "border-t" : ""}`}>{m.p10} - {m.p90} {unit}</div>
                           <div className={`px-3 py-2 text-right font-mono font-semibold ${i > 0 ? "border-t" : ""}`}>
                             <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">
                               {(m.prob * 100).toFixed(1)}%
@@ -462,9 +473,9 @@ export default async function RunDetailPage({
                     <div className="contents">
                       <div className="px-3 py-2 border-t-2 font-semibold bg-muted/30">Combined</div>
                       <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_member_count}</div>
-                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_p50}&#176;C</div>
-                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_std}&#176;C</div>
-                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_p10} - {r.forecast_snapshot.ensemble_p90}&#176;C</div>
+                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_p50} {unit}</div>
+                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_std} {unit}</div>
+                      <div className="px-3 py-2 border-t-2 text-right font-mono font-semibold bg-muted/30">{r.forecast_snapshot.ensemble_p10} - {r.forecast_snapshot.ensemble_p90} {unit}</div>
                       <div className="px-3 py-2 border-t-2 text-right font-mono font-bold bg-muted/30">
                         <span className="bg-primary/15 text-primary px-1.5 py-0.5 rounded">
                           {r.model_prob != null ? `${(r.model_prob * 100).toFixed(1)}%` : "--"}
@@ -479,7 +490,7 @@ export default async function RunDetailPage({
             {/* Pooled histogram */}
             <div className="pt-1">
               <Separator className="mb-3" />
-              <p className="text-xs text-muted-foreground mb-2">Pooled member distribution (&#176;C daily max)</p>
+              <p className="text-xs text-muted-foreground mb-2">Pooled member distribution ({unit})</p>
               <div className="flex gap-0.5 items-end h-16">
                 {(() => {
                   const members = r.forecast_snapshot!.ensemble_members!;
@@ -498,14 +509,14 @@ export default async function RunDetailPage({
                       key={i}
                       className="flex-1 bg-indigo-400 dark:bg-indigo-500 rounded-t-sm transition-all hover:bg-indigo-500 dark:hover:bg-indigo-400"
                       style={{ height: maxCount > 0 ? `${Math.max(4, (count / maxCount) * 100)}%` : "4%" }}
-                      title={`${(min + (i / bucketCount) * range).toFixed(1)} - ${(min + ((i + 1) / bucketCount) * range).toFixed(1)} C: ${count} members`}
+                      title={`${(min + (i / bucketCount) * range).toFixed(1)} - ${(min + ((i + 1) / bucketCount) * range).toFixed(1)} ${unit}: ${count} members`}
                     />
                   ));
                 })()}
               </div>
               <div className="flex justify-between text-[10px] text-muted-foreground mt-1 font-mono">
-                <span>{Math.min(...r.forecast_snapshot.ensemble_members).toFixed(1)}&#176;C</span>
-                <span>{Math.max(...r.forecast_snapshot.ensemble_members).toFixed(1)}&#176;C</span>
+                <span>{Math.min(...r.forecast_snapshot.ensemble_members).toFixed(1)} {unit}</span>
+                <span>{Math.max(...r.forecast_snapshot.ensemble_members).toFixed(1)} {unit}</span>
               </div>
             </div>
           </CardContent>
@@ -662,7 +673,7 @@ export default async function RunDetailPage({
             </div>
             <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
               <span className="text-muted-foreground">Sigma</span>
-              <span className="font-mono">{r.sigma_temp}&#176;C</span>
+              <span className="font-mono">{r.sigma_temp} {unit}</span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
               <span className="text-muted-foreground">Confidence</span>

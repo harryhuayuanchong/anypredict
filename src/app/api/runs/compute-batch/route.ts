@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { computeBatch } from "@/lib/compute";
 import { createServerClient } from "@/lib/supabase";
 import type { BatchComputeInput } from "@/lib/types";
+import { getConfigForMetric } from "@/lib/weather-config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,6 +21,9 @@ export async function POST(request: NextRequest) {
 
     // Compute all at once (1 forecast fetch, 1 ensemble fetch, N probability calcs)
     const results = await computeBatch(body);
+
+    // Derive weather config for DB metadata
+    const weatherConfig = getConfigForMetric(body.weather_metric ?? "temperature");
 
     // Generate batch ID
     const batch_id = crypto.randomUUID();
@@ -56,19 +60,46 @@ export async function POST(request: NextRequest) {
       clob_token_id_no: sm.clob_token_id_no || null,
       condition_id: sm.condition_id || null,
       neg_risk: body.neg_risk ?? false,
+      weather_metric: body.weather_metric ?? "temperature",
+      weather_unit: weatherConfig.primaryUnit,
     }));
 
-    const { data, error } = await supabase
+    // Try insert with new columns; if they don't exist yet, retry without them
+    let data: Record<string, unknown>[] | null = null;
+    const { data: d1, error: e1 } = await supabase
       .from("weather_strategy_runs")
       .insert(rows)
       .select();
 
-    if (error) {
-      console.error("Supabase batch insert error:", error);
+    if (e1 && e1.message?.includes("weather_metric")) {
+      // Migration not applied yet — strip new columns and retry
+      console.warn("weather_metric column missing, inserting without it. Run migration_005_weather_metric.sql.");
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const fallbackRows = rows.map(({ weather_metric, weather_unit, ...rest }) => rest);
+      const { data: d2, error: e2 } = await supabase
+        .from("weather_strategy_runs")
+        .insert(fallbackRows)
+        .select();
+      if (e2) {
+        console.error("Supabase batch insert error:", e2);
+        return NextResponse.json(
+          { error: `Database error: ${e2.message}` },
+          { status: 500 }
+        );
+      }
+      data = d2;
+    } else if (e1) {
+      console.error("Supabase batch insert error:", e1);
       return NextResponse.json(
-        { error: `Database error: ${error.message}` },
+        { error: `Database error: ${e1.message}` },
         { status: 500 }
       );
+    } else {
+      data = d1;
+    }
+
+    if (!data) {
+      return NextResponse.json({ error: "Insert returned no data" }, { status: 500 });
     }
 
     // Build summary response

@@ -9,6 +9,13 @@ import type {
   SingleModelResult,
   TradePlan,
 } from "./types";
+import {
+  type WeatherVariableConfig,
+  WEATHER_CONFIGS,
+  getConfigForMetric,
+} from "./weather-config";
+import { fetchEarthquakeData } from "./earthquake";
+import { fetchGistempClimateData } from "./gistemp";
 
 /* ═══════════════════════════════════════════════════════
    Math helpers
@@ -74,18 +81,22 @@ async function fetchSingleModelEnsemble(
   lat: number,
   lon: number,
   targetDate: string,
-  model: string
+  model: string,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature
 ): Promise<SingleModelResult | null> {
   try {
+    const ensVar = config.ensembleDailyVar;
+    const memberPrefix = config.ensembleMemberPrefix;
+
     const url = new URL("https://ensemble-api.open-meteo.com/v1/ensemble");
     url.searchParams.set("latitude", lat.toString());
     url.searchParams.set("longitude", lon.toString());
-    url.searchParams.set("daily", "temperature_2m_max");
+    url.searchParams.set("daily", ensVar);
     url.searchParams.set("start_date", targetDate);
     url.searchParams.set("end_date", targetDate);
     url.searchParams.set("models", model);
 
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15000) });
     if (!res.ok) return null;
 
     const data = await res.json();
@@ -94,7 +105,7 @@ async function fetchSingleModelEnsemble(
 
     const members: number[] = [];
     for (const key of Object.keys(daily)) {
-      if (key.startsWith("temperature_2m_max_member")) {
+      if (key.startsWith(`${memberPrefix}_member`)) {
         const vals = daily[key] as number[];
         if (vals && vals.length > 0 && vals[0] != null) {
           members.push(vals[0]);
@@ -103,8 +114,8 @@ async function fetchSingleModelEnsemble(
     }
 
     // Also include the control run if present
-    if (daily.temperature_2m_max) {
-      const ctrl = daily.temperature_2m_max as number[];
+    if (daily[ensVar]) {
+      const ctrl = daily[ensVar] as number[];
       if (ctrl.length > 0 && ctrl[0] != null && !members.includes(ctrl[0])) {
         members.push(ctrl[0]);
       }
@@ -121,19 +132,30 @@ async function fetchSingleModelEnsemble(
 
 /**
  * Fetch ensemble data from ALL available models in parallel, then pool results.
- * Currently queries: ECMWF IFS (51 members) + GFS (31 members).
- * Returns ~82 pooled members from genuinely different model physics.
+ * Queries 5 models: ECMWF IFS (51) + GFS (31) + ECMWF AIFS (51) + ICON (40) + GEM (21).
+ * Returns up to ~194 pooled members from genuinely different model physics.
+ * Models with shorter forecast ranges (e.g. ICON 7.5d) may return null for distant dates.
  */
 export async function fetchMultiModelEnsemble(
   lat: number,
   lon: number,
-  targetDate: string
+  targetDate: string,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature
 ): Promise<MultiModelResult | null> {
-  const modelIds = ["ecmwf_ifs025", "gfs025"];
+  // Earthquake uses synthetic ensemble from USGS, not Open-Meteo
+  if (config.dataSource === "usgs") return null;
+
+  const modelIds = [
+    "ecmwf_ifs025",   // ECMWF IFS — 51 members, 15-day range
+    "gfs025",          // GFS — 31 members, 10-day range
+    "ecmwf_aifs025",   // ECMWF AIFS (AI-enhanced) — 51 members, 15-day range
+    "icon_global",     // DWD ICON — 40 members, 7.5-day range
+    "gem_global",      // Canadian GEM — 21 members, 16-day range
+  ];
 
   // Fetch all models in parallel
   const results = await Promise.all(
-    modelIds.map((m) => fetchSingleModelEnsemble(lat, lon, targetDate, m))
+    modelIds.map((m) => fetchSingleModelEnsemble(lat, lon, targetDate, m, config))
   );
 
   // Filter out failed models
@@ -279,8 +301,10 @@ export async function fetchForecast(
   lat: number,
   lon: number,
   targetTime: string,
-  windowHours: number
+  windowHours: number,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature
 ): Promise<ForecastSnapshot> {
+  const hourlyVar = config.forecastHourlyVar;
   const target = new Date(targetTime);
   const startDate = new Date(target.getTime() - windowHours * 3600 * 1000);
   const endDate = new Date(target.getTime() + windowHours * 3600 * 1000);
@@ -290,19 +314,25 @@ export async function fetchForecast(
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", lat.toString());
   url.searchParams.set("longitude", lon.toString());
-  url.searchParams.set("hourly", "temperature_2m");
+  url.searchParams.set("hourly", hourlyVar);
   url.searchParams.set("start_date", formatDate(startDate));
   url.searchParams.set("end_date", formatDate(endDate));
   url.searchParams.set("timezone", "auto");
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(30000) });
   if (!res.ok) {
-    throw new Error(`Open-Meteo API error: ${res.status} ${res.statusText}`);
+    throw new Error(`Open-Meteo API error: ${res.status} ${res.statusText} for ${url.toString()}`);
   }
 
   const data = await res.json();
-  const times: string[] = data.hourly.time;
-  const temps: number[] = data.hourly.temperature_2m;
+  const times: string[] = data.hourly?.time ?? [];
+  const values: number[] = data.hourly?.[hourlyVar] ?? [];
+
+  if (times.length === 0 || values.length === 0) {
+    throw new Error(
+      `No forecast data returned from Open-Meteo for ${hourlyVar} at (${lat}, ${lon}) on ${formatDate(startDate)}–${formatDate(endDate)}. The date may be outside the forecast range.`
+    );
+  }
 
   // Find the closest hour to the target time
   const targetMs = target.getTime();
@@ -316,8 +346,8 @@ export async function fetchForecast(
     }
   }
 
-  // Get min/max from the window
-  const windowTemps = temps.filter((_, i) => {
+  // Get window values
+  const windowValues = values.filter((_, i) => {
     const t = new Date(times[i]).getTime();
     return (
       t >= target.getTime() - windowHours * 3600 * 1000 &&
@@ -325,16 +355,28 @@ export async function fetchForecast(
     );
   });
 
+  // For cumulative metrics (rain, snow), the forecast_value is the sum over the window;
+  // for instantaneous metrics (temp, wind), it's the max over the window.
+  let forecastValue: number;
+  if (config.dailyAggregation === "sum") {
+    forecastValue = windowValues.reduce((s, v) => s + (v ?? 0), 0);
+  } else {
+    forecastValue = values[closestIdx];
+  }
+
   return {
     latitude: data.latitude,
     longitude: data.longitude,
     timezone: data.timezone,
     hourly_times: times,
-    hourly_temps: temps,
+    hourly_temps: values, // kept as 'hourly_temps' for backward compat
     target_time: times[closestIdx],
-    forecast_temp: temps[closestIdx],
-    forecast_temp_min: windowTemps.length > 0 ? Math.min(...windowTemps) : null,
-    forecast_temp_max: windowTemps.length > 0 ? Math.max(...windowTemps) : null,
+    forecast_temp: values[closestIdx], // backward compat
+    forecast_temp_min: windowValues.length > 0 ? Math.min(...windowValues) : null,
+    forecast_temp_max: windowValues.length > 0 ? Math.max(...windowValues) : null,
+    forecast_value: forecastValue,
+    hourly_values: values,
+    weather_metric: config.metric,
   };
 }
 
@@ -350,14 +392,46 @@ export async function fetchWeatherData(
   lat: number,
   lon: number,
   resolutionTime: string,
-  timeWindowHours: number
+  timeWindowHours: number,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature,
+  eventTitle: string = ""
 ): Promise<PreFetchedWeatherData> {
-  const forecast = await fetchForecast(lat, lon, resolutionTime, timeWindowHours);
+  // Earthquake uses a completely separate data pipeline
+  if (config.dataSource === "usgs") {
+    try {
+      return await fetchEarthquakeData(lat, lon, resolutionTime);
+    } catch (err) {
+      throw new Error(
+        `USGS earthquake data fetch failed for (${lat}, ${lon}): ${err instanceof Error ? err.message : err}`
+      );
+    }
+  }
+
+  // NASA GISS climate anomaly — global index, no location needed
+  if (config.dataSource === "nasa-giss") {
+    try {
+      return await fetchGistempClimateData(resolutionTime, eventTitle);
+    } catch (err) {
+      throw new Error(
+        `NASA GISS climate data fetch failed: ${err instanceof Error ? err.message : err}`
+      );
+    }
+  }
+
+  let forecast: ForecastSnapshot;
+  try {
+    forecast = await fetchForecast(lat, lon, resolutionTime, timeWindowHours, config);
+  } catch (err) {
+    throw new Error(
+      `Weather forecast fetch failed for (${lat}, ${lon}) at ${resolutionTime} [${config.metric}]: ${err instanceof Error ? err.message : err}`
+    );
+  }
+
   const targetDate = resolutionTime.split("T")[0];
 
   let multiModel: MultiModelResult | null = null;
   try {
-    multiModel = await fetchMultiModelEnsemble(lat, lon, targetDate);
+    multiModel = await fetchMultiModelEnsemble(lat, lon, targetDate, config);
   } catch {
     // Ensemble failed — will fall back to normal distribution
   }
@@ -376,14 +450,16 @@ export async function fetchWeatherData(
  */
 export function computeStrategyFromData(
   input: ComputeInput,
-  weatherData: PreFetchedWeatherData
+  weatherData: PreFetchedWeatherData,
+  config: WeatherVariableConfig = WEATHER_CONFIGS.temperature
 ): ComputeResult {
   // Deep-clone forecast so each sub-market gets its own copy
   // (we mutate it by adding per-threshold ensemble breakdowns)
   const forecast: ForecastSnapshot = structuredClone(weatherData.forecast);
   const multiModel = weatherData.multiModel;
 
-  const mean = forecast.forecast_temp;
+  const unit = config.primaryUnit;
+  const mean = forecast.forecast_value ?? forecast.forecast_temp;
   const sigma = input.sigma_temp;
 
   // 1. Compute model probability
@@ -486,22 +562,23 @@ export function computeStrategyFromData(
       : 0;
 
   // 6. Build threshold description for rationale
+  const metricLabel = config.metric === "temperature" ? "temp" : config.metric;
   let thresholdDesc: string;
   if (input.rule_type === "above_below") {
     if (input.threshold_low != null && input.threshold_high == null) {
-      thresholdDesc = `temp ≥ ${input.threshold_low}°C`;
+      thresholdDesc = `${metricLabel} ≥ ${input.threshold_low}${unit}`;
     } else if (input.threshold_high != null && input.threshold_low == null) {
-      thresholdDesc = `temp ≤ ${input.threshold_high}°C`;
+      thresholdDesc = `${metricLabel} ≤ ${input.threshold_high}${unit}`;
     } else {
-      thresholdDesc = `temp > ${input.threshold_high ?? input.threshold_low}°C`;
+      thresholdDesc = `${metricLabel} > ${input.threshold_high ?? input.threshold_low}${unit}`;
     }
   } else {
-    thresholdDesc = `${input.threshold_low}°C ≤ temp ≤ ${input.threshold_high}°C`;
+    thresholdDesc = `${input.threshold_low}${unit} ≤ ${metricLabel} ≤ ${input.threshold_high}${unit}`;
   }
 
   // 7. Build trade plan with enriched rationale
   const rationale: string[] = [
-    `Forecast temp at ${forecast.target_time}: ${mean.toFixed(1)}°C`,
+    `Forecast ${metricLabel} at ${forecast.target_time}: ${mean.toFixed(1)}${unit}`,
   ];
 
   if (multiModel) {
@@ -511,17 +588,17 @@ export function computeStrategyFromData(
     for (const mb of forecast.ensemble_models ?? []) {
       const modelLabel = mb.model === "ecmwf_ifs025" ? "ECMWF" : mb.model === "gfs025" ? "GFS" : mb.model;
       rationale.push(
-        `  ${modelLabel} (${mb.member_count}m): P50=${mb.p50}°C, σ=${mb.std}°C → P(${thresholdDesc}) = ${(mb.prob * 100).toFixed(1)}%`
+        `  ${modelLabel} (${mb.member_count}m): P50=${mb.p50}${unit}, σ=${mb.std}${unit} → P(${thresholdDesc}) = ${(mb.prob * 100).toFixed(1)}%`
       );
     }
     rationale.push(
-      `Combined: P10=${forecast.ensemble_p10}°C, P50=${forecast.ensemble_p50}°C, P90=${forecast.ensemble_p90}°C, σ=${forecast.ensemble_std}°C`,
+      `Combined: P10=${forecast.ensemble_p10}${unit}, P50=${forecast.ensemble_p50}${unit}, P90=${forecast.ensemble_p90}${unit}, σ=${forecast.ensemble_std}${unit}`,
       `Pooled probability: P(${thresholdDesc}) = ${(modelProb * 100).toFixed(1)}%` +
         (forecast.models_agree != null ? (forecast.models_agree ? " (models agree)" : " (models DISAGREE)") : "")
     );
   } else {
     rationale.push(
-      `Probability (normal, σ=${sigma}°C): P(${thresholdDesc}) = ${(modelProb * 100).toFixed(1)}%`
+      `Probability (normal, σ=${sigma}${unit}): P(${thresholdDesc}) = ${(modelProb * 100).toFixed(1)}%`
     );
   }
 
@@ -541,20 +618,21 @@ export function computeStrategyFromData(
     );
   }
 
+  const dataSourceLabel = config.dataSource === "usgs" ? "USGS historical data" : "Open-Meteo forecast";
   const tradePlan: TradePlan = {
     recommended_side: recommendation,
     rationale,
     assumptions: [
       multiModel
         ? `Probability from ${multiModel.total_members}-member multi-model ensemble (${multiModel.models_label}) — real distribution from ${multiModel.per_model.length} independent models`
-        : `Temperature follows normal distribution with mean=${mean.toFixed(1)}°C, σ=${sigma}°C`,
-      `Open-Meteo forecast is reasonably accurate for this time window`,
+        : `${config.category} follows normal distribution with mean=${mean.toFixed(1)}${unit}, σ=${sigma}${unit}`,
+      `${dataSourceLabel} is reasonably accurate for this time window`,
       `Market is liquid enough to execute at YES=${input.yes_price}/NO=${input.no_price}`,
-      `No major weather system changes expected before resolution`,
+      `No major ${config.category.toLowerCase()} system changes expected before resolution`,
       `Position sized with half-Kelly criterion for conservative risk management`,
     ],
     invalidated_if: [
-      `Forecast updates push mean temperature across the ${thresholdDesc} boundary`,
+      `Forecast updates push mean ${metricLabel} across the ${thresholdDesc} boundary`,
       `Market spread widens significantly (> 5% from current levels)`,
       `Liquidity drops or becomes insufficient for position size`,
       `Severe weather advisory issued for the location that changes outlook`,
@@ -585,13 +663,16 @@ export function computeStrategyFromData(
  * Fetches forecast + ensemble, then delegates to computeStrategyFromData.
  */
 export async function computeStrategy(input: ComputeInput): Promise<ComputeResult> {
+  const config = getConfigForMetric(input.weather_metric ?? "temperature");
   const weatherData = await fetchWeatherData(
     input.lat,
     input.lon,
     input.resolution_time,
-    input.time_window_hours
+    input.time_window_hours,
+    config,
+    input.market_title
   );
-  return computeStrategyFromData(input, weatherData);
+  return computeStrategyFromData(input, weatherData, config);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -606,12 +687,17 @@ export async function computeStrategy(input: ComputeInput): Promise<ComputeResul
 export async function computeBatch(
   input: BatchComputeInput
 ): Promise<ComputeResult[]> {
+  // Derive config from weather_metric (defaults to temperature)
+  const config = getConfigForMetric(input.weather_metric ?? "temperature");
+
   // 1. Fetch all weather data ONCE (shared location + date)
   const weatherData = await fetchWeatherData(
     input.lat,
     input.lon,
     input.resolution_time,
-    input.time_window_hours
+    input.time_window_hours,
+    config,
+    input.event_title
   );
 
   // 2. Compute for each sub-market (synchronous — no API calls)
@@ -636,7 +722,8 @@ export async function computeBatch(
       forecast_source: input.forecast_source,
       time_window_hours: input.time_window_hours,
       min_edge: input.min_edge,
+      weather_metric: input.weather_metric,
     };
-    return computeStrategyFromData(singleInput, weatherData);
+    return computeStrategyFromData(singleInput, weatherData, config);
   });
 }

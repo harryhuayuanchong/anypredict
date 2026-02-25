@@ -43,6 +43,18 @@ export default async function BatchPage({
   const location = firstRun.location_text;
   const resolutionTime = firstRun.resolution_time;
 
+  // Derive display unit from weather_metric
+  const METRIC_UNITS: Record<string, { primary: string; secondary: string | null; convert: ((v: number) => number) | null }> = {
+    temperature: { primary: "°C", secondary: "°F", convert: (c) => Math.round(c * 9 / 5 + 32) },
+    snowfall: { primary: "cm", secondary: "in", convert: (cm) => Math.round(cm / 2.54 * 10) / 10 },
+    rainfall: { primary: "mm", secondary: "in", convert: (mm) => Math.round(mm / 25.4 * 100) / 100 },
+    wind_speed: { primary: "km/h", secondary: "mph", convert: (kmh) => Math.round(kmh * 0.621371 * 10) / 10 },
+    earthquake_magnitude: { primary: "M", secondary: null, convert: null },
+    climate_anomaly: { primary: "°C", secondary: null, convert: null },
+  };
+  const metricInfo = METRIC_UNITS[firstRun.weather_metric ?? "temperature"] ?? METRIC_UNITS.temperature;
+  const displayUnit = metricInfo.primary;
+
   // Categorize
   const buyNoRuns = runs
     .filter((r) => r.recommendation === "BUY_NO")
@@ -73,24 +85,26 @@ export default async function BatchPage({
 
   // Helper to build a clear threshold label from run data
   function getThresholdLabel(run: WeatherStrategyRun): string {
-    const lowC = run.threshold_low;
-    const highC = run.threshold_high;
+    const low = run.threshold_low;
+    const high = run.threshold_high;
 
-    // Convert °C to °F for display (Polymarket uses °F)
-    const cToF = (c: number) => Math.round(c * 9 / 5 + 32);
+    // For temperature, convert to secondary unit (°F) for Polymarket display
+    // For other metrics, show in secondary unit if available, else primary
+    const convert = metricInfo.convert;
+    const showUnit = metricInfo.secondary ?? metricInfo.primary;
+    const fmt = convert ? convert : (v: number) => v;
 
-    if (run.rule_type === "range" && lowC != null && highC != null) {
-      return `${cToF(lowC)}–${cToF(highC)} °F`;
+    if (run.rule_type === "range" && low != null && high != null) {
+      return `${fmt(low)}–${fmt(high)} ${showUnit}`;
     }
-    if (lowC != null && highC == null) {
-      return `≥ ${cToF(lowC)} °F`;
+    if (low != null && high == null) {
+      return `≥ ${fmt(low)} ${showUnit}`;
     }
-    if (highC != null && lowC == null) {
-      return `≤ ${cToF(highC)} °F`;
+    if (high != null && low == null) {
+      return `≤ ${fmt(high)} ${showUnit}`;
     }
-    if (lowC != null && highC != null) {
-      // above_below with both — use whichever makes sense
-      return `${cToF(lowC)}–${cToF(highC)} °F`;
+    if (low != null && high != null) {
+      return `${fmt(low)}–${fmt(high)} ${showUnit}`;
     }
     // Fallback: extract from title
     const parts = run.market_title.split(" — ");
@@ -431,33 +445,33 @@ export default async function BatchPage({
           <CardContent>
             <div className="flex flex-wrap gap-4 text-sm">
               <div>
-                <span className="text-muted-foreground">Forecast Temp:</span>{" "}
+                <span className="text-muted-foreground">Forecast Value:</span>{" "}
                 <span className="font-mono font-medium">
-                  {forecast.forecast_temp?.toFixed(1)}°C
+                  {(forecast.forecast_value ?? forecast.forecast_temp)?.toFixed(1)} {displayUnit}
                 </span>
               </div>
               <div>
                 <span className="text-muted-foreground">P10:</span>{" "}
                 <span className="font-mono">
-                  {forecast.ensemble_p10?.toFixed(1)}°C
+                  {forecast.ensemble_p10?.toFixed(1)} {displayUnit}
                 </span>
               </div>
               <div>
                 <span className="text-muted-foreground">P50:</span>{" "}
                 <span className="font-mono font-medium">
-                  {forecast.ensemble_p50?.toFixed(1)}°C
+                  {forecast.ensemble_p50?.toFixed(1)} {displayUnit}
                 </span>
               </div>
               <div>
                 <span className="text-muted-foreground">P90:</span>{" "}
                 <span className="font-mono">
-                  {forecast.ensemble_p90?.toFixed(1)}°C
+                  {forecast.ensemble_p90?.toFixed(1)} {displayUnit}
                 </span>
               </div>
               <div>
                 <span className="text-muted-foreground">σ:</span>{" "}
                 <span className="font-mono">
-                  {forecast.ensemble_std?.toFixed(2)}°C
+                  {forecast.ensemble_std?.toFixed(2)} {displayUnit}
                 </span>
               </div>
             </div>

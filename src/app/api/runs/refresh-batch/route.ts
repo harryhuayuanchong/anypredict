@@ -5,7 +5,12 @@ import type { ComputeInput, WeatherStrategyRun } from "@/lib/types";
 import {
   extractSlugFromUrl,
   parseTemperatureFromQuestion,
+  parseThresholdFromQuestion,
 } from "@/lib/polymarket";
+import {
+  getConfigForMetric,
+  detectCategory,
+} from "@/lib/weather-config";
 
 /**
  * POST /api/runs/refresh-batch
@@ -39,6 +44,9 @@ export async function POST(request: NextRequest) {
     const runs = rawRuns as WeatherStrategyRun[];
     const firstRun = runs[0];
 
+    // Derive weather config from the batch's metric
+    const weatherConfig = getConfigForMetric(firstRun.weather_metric ?? "temperature");
+
     // 2. Re-fetch latest prices from Polymarket Gamma API
     const slug = extractSlugFromUrl(firstRun.market_url);
     let freshPrices: Map<string, { yes_price: number; no_price: number }> | null = null;
@@ -53,10 +61,14 @@ export async function POST(request: NextRequest) {
           const event = await gammaRes.json();
           const markets = event.markets || [];
           freshPrices = new Map();
+          const eventCategory = detectCategory(event.title || "");
 
           for (const m of markets) {
             const question = m.question || m.groupItemTitle || "";
-            const parsed = parseTemperatureFromQuestion(question);
+
+            // Try unified parser first, then fall back to temp parser
+            const genericParsed = parseThresholdFromQuestion(question, eventCategory);
+            const tempParsed = parseTemperatureFromQuestion(question);
 
             let yesPrice = 0.5;
             let noPrice = 0.5;
@@ -74,8 +86,11 @@ export async function POST(request: NextRequest) {
             }
 
             // Match by threshold values to pair with existing runs
-            if (parsed) {
-              const key = `${parsed.rule_type}:${parsed.threshold_low_c}:${parsed.threshold_high_c}`;
+            if (genericParsed) {
+              const key = `${genericParsed.rule_type}:${genericParsed.threshold_low}:${genericParsed.threshold_high}`;
+              freshPrices.set(key, { yes_price: yesPrice, no_price: noPrice });
+            } else if (tempParsed) {
+              const key = `${tempParsed.rule_type}:${tempParsed.threshold_low_c}:${tempParsed.threshold_high_c}`;
               freshPrices.set(key, { yes_price: yesPrice, no_price: noPrice });
             }
           }
@@ -90,7 +105,8 @@ export async function POST(request: NextRequest) {
       firstRun.lat ?? 0,
       firstRun.lon ?? 0,
       firstRun.resolution_time,
-      3 // default time window
+      3, // default time window
+      weatherConfig
     );
 
     // 4. Recompute each run with latest prices + fresh weather
@@ -140,9 +156,10 @@ export async function POST(request: NextRequest) {
         forecast_source: run.forecast_source,
         time_window_hours: 3,
         min_edge: 0.05,
+        weather_metric: run.weather_metric ?? "temperature",
       };
 
-      const result = computeStrategyFromData(input, weatherData);
+      const result = computeStrategyFromData(input, weatherData, weatherConfig);
 
       updates.push({
         id: run.id,

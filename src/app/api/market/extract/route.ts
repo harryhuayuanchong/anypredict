@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   extractSlugFromUrl,
   extractCityFromTitle,
+  extractRegionFromTitle,
   parseTemperatureFromQuestion,
+  parseThresholdFromQuestion,
   type ExtractedEvent,
   type ParsedSubMarket,
 } from "@/lib/polymarket";
+import {
+  detectCategory,
+  CATEGORY_TO_METRIC,
+  getConfigForCategory,
+} from "@/lib/weather-config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,8 +52,43 @@ export async function POST(request: NextRequest) {
 
     const event = await res.json();
 
-    // 3. Extract city/location from title
-    const cityInfo = extractCityFromTitle(event.title || "");
+    // 3. Detect weather category from event title
+    const category = detectCategory(event.title || "");
+    const weatherMetric = CATEGORY_TO_METRIC[category] ?? "temperature";
+    const weatherConfig = getConfigForCategory(category);
+
+    // 3b. Extract location from title — varies by category
+    const isGlobalIndex = !weatherConfig.requiresLocation; // e.g. climate anomaly
+    const isEarthquake = category === "Earthquake";
+
+    let locationName: string | null = null;
+    let locationLat: number | null = null;
+    let locationLon: number | null = null;
+    let searchRadiusKm = 250;
+    let locationType: "city" | "region" | "global" | "unknown" = "unknown";
+
+    if (isGlobalIndex) {
+      // Global index events (e.g. GISTEMP) — no location needed
+      locationName = "Global";
+      locationLat = 0;
+      locationLon = 0;
+      locationType = "global";
+    } else {
+      const cityInfo = extractCityFromTitle(event.title || "");
+      const regionInfo = extractRegionFromTitle(event.title || "");
+
+      locationName = isEarthquake
+        ? (regionInfo?.region ?? cityInfo?.city ?? null)
+        : (cityInfo?.city ?? regionInfo?.region ?? null);
+      locationLat = isEarthquake
+        ? (regionInfo?.lat ?? cityInfo?.lat ?? null)
+        : (cityInfo?.lat ?? regionInfo?.lat ?? null);
+      locationLon = isEarthquake
+        ? (regionInfo?.lon ?? cityInfo?.lon ?? null)
+        : (cityInfo?.lon ?? regionInfo?.lon ?? null);
+      searchRadiusKm = regionInfo?.radius_km ?? 250;
+      locationType = cityInfo ? "city" : regionInfo ? "region" : "unknown";
+    }
 
     // 4. Parse sub-markets
     const markets = event.markets || [];
@@ -54,7 +96,12 @@ export async function POST(request: NextRequest) {
 
     for (const m of markets) {
       const question = m.question || m.groupItemTitle || "";
-      const parsed = parseTemperatureFromQuestion(question);
+
+      // Try unified parser first; fall back to temperature parser for backward compat
+      const genericParsed = parseThresholdFromQuestion(question, category);
+      const parsed = category === "Temperature"
+        ? parseTemperatureFromQuestion(question)
+        : null;
 
       // Parse outcome prices
       let yesPrice = 0.5;
@@ -93,6 +140,7 @@ export async function POST(request: NextRequest) {
       const conditionId = m.conditionId || null;
 
       if (parsed) {
+        // Temperature category — use legacy temperature-specific parser
         subMarkets.push({
           id: m.id || m.conditionId || "",
           question,
@@ -111,8 +159,28 @@ export async function POST(request: NextRequest) {
           clob_token_id_no: clobNo,
           condition_id: conditionId,
         });
+      } else if (genericParsed) {
+        // Non-temperature category — use unified generic parser
+        subMarkets.push({
+          id: m.id || m.conditionId || "",
+          question,
+          yes_price: yesPrice,
+          no_price: noPrice,
+          rule_type: genericParsed.rule_type,
+          threshold_low_c: genericParsed.threshold_low, // primary-unit value
+          threshold_high_c: genericParsed.threshold_high,
+          threshold_low_f: genericParsed.threshold_low_secondary,
+          threshold_high_f: genericParsed.threshold_high_secondary,
+          unit: genericParsed.primary_unit,
+          label: genericParsed.label,
+          liquidity: parseFloat(m.liquidity) || 0,
+          volume: parseFloat(m.volume) || 0,
+          clob_token_id_yes: clobYes,
+          clob_token_id_no: clobNo,
+          condition_id: conditionId,
+        });
       } else {
-        // Include even if we can't parse temps — user can fill manually
+        // Include even if we can't parse — user can fill manually
         subMarkets.push({
           id: m.id || m.conditionId || "",
           question,
@@ -136,23 +204,34 @@ export async function POST(request: NextRequest) {
 
     // Sort sub-markets by threshold (ascending)
     subMarkets.sort((a, b) => {
-      const aVal = a.threshold_low_f ?? a.threshold_high_f ?? 0;
-      const bVal = b.threshold_low_f ?? b.threshold_high_f ?? 0;
+      const aVal = a.threshold_low_c ?? a.threshold_high_c ?? a.threshold_low_f ?? a.threshold_high_f ?? 0;
+      const bVal = b.threshold_low_c ?? b.threshold_high_c ?? b.threshold_low_f ?? b.threshold_high_f ?? 0;
       return aVal - bVal;
     });
 
-    const result: ExtractedEvent = {
+    const result: ExtractedEvent & {
+      weather_metric?: string;
+      weather_category?: string;
+      weather_unit?: string;
+      location_type?: string;
+      search_radius_km?: number;
+    } = {
       event_title: event.title || slug,
       event_slug: slug,
       event_url: url,
       description: event.description || "",
       end_date: event.endDate || event.end_date || null,
       resolution_source: event.resolutionSource || null,
-      city: cityInfo?.city || null,
-      lat: cityInfo?.lat || null,
-      lon: cityInfo?.lon || null,
+      city: locationName,
+      lat: locationLat,
+      lon: locationLon,
       neg_risk: !!event.negRisk,
       sub_markets: subMarkets,
+      weather_metric: weatherMetric,
+      weather_category: category,
+      weather_unit: weatherConfig.primaryUnit,
+      location_type: locationType,
+      search_radius_km: searchRadiusKm,
       raw_event: {
         id: event.id,
         title: event.title,

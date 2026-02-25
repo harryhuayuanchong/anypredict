@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import type { ExtractedEvent } from "@/lib/polymarket";
 
-// Well-known cities for manual fallback
+// Well-known cities for manual fallback (weather events)
 const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
   "New York": { lat: 40.7128, lon: -73.906 },
   "Los Angeles": { lat: 34.0522, lon: -118.2437 },
@@ -37,6 +37,43 @@ const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
   Seoul: { lat: 37.5665, lon: 126.978 },
 };
 
+// Seismic regions for earthquake events
+const SEISMIC_REGIONS: Record<string, { lat: number; lon: number; radius_km: number }> = {
+  "California": { lat: 36.7783, lon: -119.4179, radius_km: 400 },
+  "Japan": { lat: 36.2048, lon: 138.2529, radius_km: 500 },
+  "Turkey": { lat: 39.9334, lon: 32.8597, radius_km: 500 },
+  "Indonesia": { lat: -0.7893, lon: 113.9213, radius_km: 800 },
+  "Chile": { lat: -35.6751, lon: -71.543, radius_km: 500 },
+  "Mexico": { lat: 23.6345, lon: -102.5528, radius_km: 500 },
+  "Alaska": { lat: 64.2008, lon: -152.4937, radius_km: 500 },
+  "Taiwan": { lat: 23.6978, lon: 120.9605, radius_km: 250 },
+  "Philippines": { lat: 12.8797, lon: 121.774, radius_km: 500 },
+  "New Zealand": { lat: -40.9006, lon: 174.886, radius_km: 400 },
+  "Italy": { lat: 41.8719, lon: 12.5674, radius_km: 400 },
+  "Greece": { lat: 39.0742, lon: 21.8243, radius_km: 300 },
+  "Nepal": { lat: 28.3949, lon: 84.124, radius_km: 300 },
+  "Hawaii": { lat: 19.8968, lon: -155.5828, radius_km: 300 },
+  "Iceland": { lat: 64.9631, lon: -19.0208, radius_km: 250 },
+};
+
+/** Category-specific display config */
+const CATEGORY_DISPLAY: Record<string, {
+  icon: string;
+  color: string;
+  locationLabel: string;
+  locationPlaceholder: string;
+  dataSource: string;
+}> = {
+  Temperature: { icon: "🌡️", color: "text-red-500", locationLabel: "City", locationPlaceholder: "New York", dataSource: "Open-Meteo" },
+  Snow: { icon: "❄️", color: "text-blue-400", locationLabel: "City", locationPlaceholder: "Denver", dataSource: "Open-Meteo" },
+  Rain: { icon: "🌧️", color: "text-blue-600", locationLabel: "City", locationPlaceholder: "Seattle", dataSource: "Open-Meteo" },
+  Storm: { icon: "🌪️", color: "text-purple-500", locationLabel: "City", locationPlaceholder: "Miami", dataSource: "Open-Meteo" },
+  Earthquake: { icon: "🌍", color: "text-amber-600", locationLabel: "Region / Epicenter", locationPlaceholder: "California", dataSource: "USGS Historical" },
+  ClimateAnomaly: { icon: "📊", color: "text-emerald-600", locationLabel: "Global Index", locationPlaceholder: "Global", dataSource: "NASA GISS GISTEMP" },
+  Climate: { icon: "🌡️", color: "text-orange-500", locationLabel: "City", locationPlaceholder: "New York", dataSource: "Open-Meteo" },
+  Weather: { icon: "⛅", color: "text-sky-500", locationLabel: "City", locationPlaceholder: "New York", dataSource: "Open-Meteo" },
+};
+
 interface FormData {
   market_url: string;
   resolution_time: string;
@@ -53,6 +90,16 @@ interface FormData {
   user_confidence: string;
   min_edge: string;
 }
+
+/** Sigma defaults per weather metric */
+const SIGMA_DEFAULTS: Record<string, { sigma: string; label: string; unit: string }> = {
+  temperature: { sigma: "1.5", label: "σ Temperature (°C)", unit: "°C" },
+  snowfall: { sigma: "2.0", label: "σ Snowfall (cm)", unit: "cm" },
+  rainfall: { sigma: "5.0", label: "σ Rainfall (mm)", unit: "mm" },
+  wind_speed: { sigma: "10.0", label: "σ Wind Gusts (km/h)", unit: "km/h" },
+  earthquake_magnitude: { sigma: "0.5", label: "σ Magnitude (Richter)", unit: "M" },
+  climate_anomaly: { sigma: "0.15", label: "σ Anomaly (°C)", unit: "°C" },
+};
 
 const DEFAULT_FORM: FormData = {
   market_url: "",
@@ -92,6 +139,11 @@ function NewRunPageInner() {
   const [extractedEvent, setExtractedEvent] = useState<ExtractedEvent | null>(
     null
   );
+  const [weatherMetric, setWeatherMetric] = useState<string>("temperature");
+  const [weatherCategory, setWeatherCategory] = useState<string>("Temperature");
+  const [weatherUnit, setWeatherUnit] = useState<string>("°C");
+  const [locationType, setLocationType] = useState<"city" | "region" | "global" | "unknown">("unknown");
+  const [searchRadiusKm, setSearchRadiusKm] = useState<string>("250");
 
   const set = (key: keyof FormData, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -115,6 +167,21 @@ function NewRunPageInner() {
       const event = data as ExtractedEvent;
       setExtractedEvent(event);
 
+      // Extract weather metric info from response
+      const metric = data.weather_metric ?? "temperature";
+      const category = data.weather_category ?? "Temperature";
+      const unit = data.weather_unit ?? "°C";
+      const locType = data.location_type ?? "unknown";
+      const radius = data.search_radius_km ?? 250;
+      setWeatherMetric(metric);
+      setWeatherCategory(category);
+      setWeatherUnit(unit);
+      setLocationType(locType as "city" | "region" | "global" | "unknown");
+      setSearchRadiusKm(radius.toString());
+
+      // Get appropriate sigma default for this metric
+      const sigmaDefault = SIGMA_DEFAULTS[metric]?.sigma ?? "1.5";
+
       // Auto-fill event-level fields
       setForm((prev) => ({
         ...prev,
@@ -125,6 +192,7 @@ function NewRunPageInner() {
         location_text: event.city || prev.location_text,
         lat: event.lat?.toString() || prev.lat,
         lon: event.lon?.toString() || prev.lon,
+        sigma_temp: sigmaDefault,
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extract failed");
@@ -155,14 +223,31 @@ function NewRunPageInner() {
     }
   };
 
-  // Can proceed: need URL, extracted event with sub-markets, location, and resolution time
+  // ─── Region select for earthquake events ───
+  const handleRegionSelect = (region: string) => {
+    const data = SEISMIC_REGIONS[region];
+    if (data) {
+      setForm((prev) => ({
+        ...prev,
+        location_text: region,
+        lat: data.lat.toString(),
+        lon: data.lon.toString(),
+      }));
+      setSearchRadiusKm(data.radius_km.toString());
+    }
+  };
+
+  const isEarthquake = weatherCategory === "Earthquake";
+  const isGlobalIndex = locationType === "global" || weatherCategory === "ClimateAnomaly";
+  const categoryDisplay = CATEGORY_DISPLAY[weatherCategory] ?? CATEGORY_DISPLAY.Weather;
+
+  // Can proceed: need URL, extracted event with sub-markets, resolution time, and location (unless global)
   const canProceedA =
     form.market_url &&
     extractedEvent &&
     extractedEvent.sub_markets.length > 0 &&
     form.resolution_time &&
-    form.lat &&
-    form.lon;
+    (isGlobalIndex || (form.lat && form.lon));
 
   // ─── Batch compute all markets ───
   const handleBatchCompute = async () => {
@@ -192,6 +277,7 @@ function NewRunPageInner() {
           time_window_hours: parseInt(form.time_window_hours) || 3,
           min_edge: parseFloat(form.min_edge) || 0.05,
           neg_risk: extractedEvent.neg_risk,
+          weather_metric: weatherMetric,
           sub_markets: extractedEvent.sub_markets.map((sm) => ({
             id: sm.id,
             question: sm.question,
@@ -219,7 +305,11 @@ function NewRunPageInner() {
     }
   };
 
-  const steps = ["Event & Markets", "Weather Config", "Compute All"];
+  const steps = [
+    "Event & Markets",
+    isGlobalIndex ? "Climate Config" : isEarthquake ? "Seismic Config" : "Weather Config",
+    "Compute All",
+  ];
 
   return (
     <div className="space-y-6">
@@ -298,14 +388,25 @@ function NewRunPageInner() {
                       <p className="font-medium text-sm">
                         {extractedEvent.event_title}
                       </p>
-                      {extractedEvent.city && (
-                        <p className="text-xs text-muted-foreground">
-                          Location: {extractedEvent.city} (
-                          {extractedEvent.lat}, {extractedEvent.lon})
-                        </p>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <Badge variant="secondary" className="text-xs">
+                          <span className="mr-1">{categoryDisplay.icon}</span>
+                          {weatherCategory}
+                        </Badge>
+                        {extractedEvent.city && (
+                          <span className="text-xs text-muted-foreground">
+                            {isEarthquake ? "Region" : "Location"}: {extractedEvent.city}
+                            {extractedEvent.lat && ` (${extractedEvent.lat}, ${extractedEvent.lon})`}
+                          </span>
+                        )}
+                        {!extractedEvent.city && (
+                          <span className="text-xs text-amber-600">
+                            ⚠ No location detected — set manually below
+                          </span>
+                        )}
+                      </div>
                       {extractedEvent.end_date && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           Ends:{" "}
                           {new Date(extractedEvent.end_date).toLocaleString()}
                         </p>
@@ -320,7 +421,7 @@ function NewRunPageInner() {
                   {extractedEvent.sub_markets.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">
-                        All temperature buckets (will be analyzed together):
+                        All {weatherCategory.toLowerCase()} buckets (will be analyzed together):
                       </p>
                       <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                         {extractedEvent.sub_markets.map((sm) => (
@@ -357,10 +458,10 @@ function NewRunPageInner() {
           {/* Shared Event Config */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">
+              <CardTitle className="text-base flex items-center gap-2">
                 Event Details
                 {extractedEvent && (
-                  <span className="text-xs font-normal text-muted-foreground ml-2">
+                  <span className="text-xs font-normal text-muted-foreground">
                     (auto-filled — edit as needed)
                   </span>
                 )}
@@ -377,73 +478,136 @@ function NewRunPageInner() {
                     onChange={(e) => set("resolution_time", e.target.value)}
                   />
                 </div>
-              </div>
-
-              <Separator />
-
-              {/* Location */}
-              <div className="space-y-2">
-                <Label>
-                  Location
-                  {extractedEvent?.city && (
-                    <span className="text-xs text-green-600 ml-1">
-                      (auto-detected: {extractedEvent.city})
-                    </span>
-                  )}
-                </Label>
-                {!extractedEvent?.city && (
-                  <div className="flex flex-wrap gap-1">
-                    {Object.keys(CITY_COORDS).map((city) => (
-                      <button
-                        key={city}
-                        type="button"
-                        onClick={() => handleCitySelect(city)}
-                        className={`text-xs px-2 py-1 rounded border transition-colors ${
-                          form.location_text === city
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-muted hover:bg-muted/80 border-transparent"
-                        }`}
-                      >
-                        {city}
-                      </button>
-                    ))}
+                {extractedEvent && (
+                  <div className="space-y-2">
+                    <Label>Data Source</Label>
+                    <div className="flex items-center h-9 px-3 rounded-md border bg-muted/50 text-sm">
+                      <span className="mr-2">{categoryDisplay.icon}</span>
+                      {categoryDisplay.dataSource}
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="location_text">Location Name</Label>
-                  <Input
-                    id="location_text"
-                    placeholder="New York"
-                    value={form.location_text}
-                    onChange={(e) => set("location_text", e.target.value)}
-                  />
+              <Separator />
+
+              {/* Location — hidden for global index events, adapts for others */}
+              {isGlobalIndex ? (
+                <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 text-sm">
+                  <p className="font-medium text-emerald-800 dark:text-emerald-300">
+                    Global Index — No Location Required
+                  </p>
+                  <p className="text-emerald-700 dark:text-emerald-400 text-xs mt-1">
+                    This event resolves from NASA&apos;s Global Land-Ocean Temperature Index (GISTEMP),
+                    a worldwide average — no specific coordinates needed.
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lat">Latitude</Label>
-                  <Input
-                    id="lat"
-                    type="number"
-                    step="0.0001"
-                    placeholder="40.7128"
-                    value={form.lat}
-                    onChange={(e) => set("lat", e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lon">Longitude</Label>
-                  <Input
-                    id="lon"
-                    type="number"
-                    step="0.0001"
-                    placeholder="-73.9060"
-                    value={form.lon}
-                    onChange={(e) => set("lon", e.target.value)}
-                  />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>
+                      {categoryDisplay.locationLabel}
+                      {extractedEvent?.city && locationType !== "unknown" && (
+                        <span className="text-xs text-green-600 ml-1">
+                          (auto-detected: {extractedEvent.city})
+                        </span>
+                      )}
+                    </Label>
+
+                    {/* Show presets only when no location auto-detected */}
+                    {(!extractedEvent?.city || locationType === "unknown") && (
+                      <div className="flex flex-wrap gap-1">
+                        {isEarthquake
+                          ? Object.keys(SEISMIC_REGIONS).map((region) => (
+                              <button
+                                key={region}
+                                type="button"
+                                onClick={() => handleRegionSelect(region)}
+                                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                                  form.location_text === region
+                                    ? "bg-primary text-primary-foreground border-primary"
+                                    : "bg-muted hover:bg-muted/80 border-transparent"
+                                }`}
+                              >
+                                {region}
+                              </button>
+                            ))
+                          : Object.keys(CITY_COORDS).map((city) => (
+                              <button
+                                key={city}
+                                type="button"
+                                onClick={() => handleCitySelect(city)}
+                                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                                  form.location_text === city
+                                    ? "bg-primary text-primary-foreground border-primary"
+                                    : "bg-muted hover:bg-muted/80 border-transparent"
+                                }`}
+                              >
+                                {city}
+                              </button>
+                            ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={`grid gap-4 ${isEarthquake ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+                    <div className="space-y-2">
+                      <Label htmlFor="location_text">
+                        {isEarthquake ? "Region Name" : "Location Name"}
+                      </Label>
+                      <Input
+                        id="location_text"
+                        placeholder={categoryDisplay.locationPlaceholder}
+                        value={form.location_text}
+                        onChange={(e) => set("location_text", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lat">
+                        {isEarthquake ? "Center Lat" : "Latitude"}
+                      </Label>
+                      <Input
+                        id="lat"
+                        type="number"
+                        step="0.0001"
+                        placeholder={isEarthquake ? "36.7783" : "40.7128"}
+                        value={form.lat}
+                        onChange={(e) => set("lat", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lon">
+                        {isEarthquake ? "Center Lon" : "Longitude"}
+                      </Label>
+                      <Input
+                        id="lon"
+                        type="number"
+                        step="0.0001"
+                        placeholder={isEarthquake ? "-119.4179" : "-73.9060"}
+                        value={form.lon}
+                        onChange={(e) => set("lon", e.target.value)}
+                      />
+                    </div>
+                    {isEarthquake && (
+                      <div className="space-y-2">
+                        <Label htmlFor="search_radius">Search Radius (km)</Label>
+                        <Input
+                          id="search_radius"
+                          type="number"
+                          min="50"
+                          max="2000"
+                          step="50"
+                          value={searchRadiusKm}
+                          onChange={(e) => setSearchRadiusKm(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          USGS search radius around the center point
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               <Separator />
 
@@ -471,7 +635,7 @@ function NewRunPageInner() {
 
               <div className="flex justify-end">
                 <Button onClick={() => setStep(1)} disabled={!canProceedA}>
-                  Next: Weather Config
+                  Next: {isGlobalIndex ? "Climate Config" : isEarthquake ? "Seismic Config" : "Weather Config"}
                 </Button>
               </div>
             </CardContent>
@@ -485,61 +649,113 @@ function NewRunPageInner() {
       {step === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle>Weather Configuration</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              {isGlobalIndex ? "Climate Index Configuration" : isEarthquake ? "Seismic Configuration" : "Weather Configuration"}
+              <Badge variant="secondary" className="text-xs font-normal">
+                <span className="mr-1">{categoryDisplay.icon}</span>
+                {weatherCategory}
+              </Badge>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="forecast_source">Forecast Source</Label>
-                <Select
-                  value={form.forecast_source}
-                  onValueChange={(v) => set("forecast_source", v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="open-meteo">
-                      Open-Meteo (free)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="time_window_hours">
-                  Time Window (± hours)
+                <Label htmlFor="forecast_source">
+                  {isGlobalIndex || isEarthquake ? "Data Source" : "Forecast Source"}
                 </Label>
-                <Input
-                  id="time_window_hours"
-                  type="number"
-                  min="0"
-                  max="24"
-                  value={form.time_window_hours}
-                  onChange={(e) => set("time_window_hours", e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Hours before/after target time to fetch forecast data
-                </p>
+                {isGlobalIndex ? (
+                  <div className="flex items-center h-9 px-3 rounded-md border bg-muted/50 text-sm">
+                    📊 NASA GISS GISTEMP (1880–present)
+                  </div>
+                ) : isEarthquake ? (
+                  <div className="flex items-center h-9 px-3 rounded-md border bg-muted/50 text-sm">
+                    🌍 USGS Historical Frequency (20yr lookback)
+                  </div>
+                ) : (
+                  <Select
+                    value={form.forecast_source}
+                    onValueChange={(v) => set("forecast_source", v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open-meteo">
+                        Open-Meteo (free)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
+              {!isEarthquake && !isGlobalIndex && (
+                <div className="space-y-2">
+                  <Label htmlFor="time_window_hours">
+                    Time Window (± hours)
+                  </Label>
+                  <Input
+                    id="time_window_hours"
+                    type="number"
+                    min="0"
+                    max="24"
+                    value={form.time_window_hours}
+                    onChange={(e) => set("time_window_hours", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Hours before/after target time to fetch forecast data
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="sigma_temp">Sigma σ (°C uncertainty)</Label>
+                <Label htmlFor="sigma_temp">
+                  {SIGMA_DEFAULTS[weatherMetric]?.label ?? "σ (uncertainty)"}
+                </Label>
                 <Input
                   id="sigma_temp"
                   type="number"
                   step="0.1"
                   min="0.1"
-                  max="10"
+                  max="50"
                   value={form.sigma_temp}
                   onChange={(e) => set("sigma_temp", e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Standard deviation for normal distribution model. Higher =
-                  more uncertain. Default 1.5°C.
+                  {isGlobalIndex
+                    ? `Uncertainty in the climate trend extrapolation. Default ${SIGMA_DEFAULTS[weatherMetric]?.sigma ?? "0.15"}${weatherUnit}.`
+                    : isEarthquake
+                    ? `Uncertainty in magnitude estimation. Default ${SIGMA_DEFAULTS[weatherMetric]?.sigma ?? "0.5"}${weatherUnit}.`
+                    : `Standard deviation for normal distribution model. Higher = more uncertain. Default ${SIGMA_DEFAULTS[weatherMetric]?.sigma ?? "1.5"}${weatherUnit}.`
+                  }
                 </p>
               </div>
             </div>
+
+            {isGlobalIndex && (
+              <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 text-sm">
+                <p className="font-medium text-emerald-800 dark:text-emerald-300 mb-1">
+                  Climate Anomaly Analysis Method
+                </p>
+                <p className="text-emerald-700 dark:text-emerald-400 text-xs">
+                  Uses NASA GISS GISTEMP historical monthly anomaly data (1880–present).
+                  A linear trend is fitted to recent decades, and a synthetic ensemble of 1,000 scenarios
+                  is generated from the trend-adjusted residual distribution to estimate bracket probabilities.
+                </p>
+              </div>
+            )}
+
+            {isEarthquake && (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 text-sm">
+                <p className="font-medium text-amber-800 dark:text-amber-300 mb-1">
+                  Earthquake Analysis Method
+                </p>
+                <p className="text-amber-700 dark:text-amber-400 text-xs">
+                  Uses USGS historical earthquake data within {searchRadiusKm}km of the center point.
+                  A synthetic ensemble of 1,000 scenarios is generated using Poisson frequency modeling
+                  and the Gutenberg-Richter magnitude distribution to estimate probabilities.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="confidence_notes">
@@ -547,7 +763,10 @@ function NewRunPageInner() {
               </Label>
               <Textarea
                 id="confidence_notes"
-                placeholder="Why do you trust this forecast? Any local knowledge?"
+                placeholder={isEarthquake
+                  ? "Any knowledge about recent seismic activity in this region?"
+                  : "Why do you trust this forecast? Any local knowledge?"
+                }
                 value={form.confidence_notes}
                 onChange={(e) => set("confidence_notes", e.target.value)}
                 rows={3}
@@ -628,25 +847,48 @@ function NewRunPageInner() {
 
             {/* Summary before compute */}
             <div className="rounded-md bg-muted p-4 text-sm space-y-2">
-              <p className="font-medium">
-                {extractedEvent?.event_title || "—"}
-              </p>
-              <div className="grid gap-1 text-muted-foreground">
-                <p>
-                  <span className="text-foreground font-medium">Location:</span>{" "}
-                  {form.location_text || `${form.lat}, ${form.lon}`}
+              <div className="flex items-center gap-2">
+                <p className="font-medium">
+                  {extractedEvent?.event_title || "—"}
                 </p>
+                <Badge variant="secondary" className="text-xs shrink-0">
+                  <span className="mr-1">{categoryDisplay.icon}</span>
+                  {weatherCategory}
+                </Badge>
+              </div>
+              <div className="grid gap-1 text-muted-foreground">
+                {!isGlobalIndex && (
+                  <p>
+                    <span className="text-foreground font-medium">
+                      {isEarthquake ? "Region:" : "Location:"}
+                    </span>{" "}
+                    {form.location_text || `${form.lat}, ${form.lon}`}
+                    {isEarthquake && ` (${searchRadiusKm}km radius)`}
+                  </p>
+                )}
+                {isGlobalIndex && (
+                  <p>
+                    <span className="text-foreground font-medium">Scope:</span>{" "}
+                    Global Land-Ocean Temperature Index
+                  </p>
+                )}
                 <p>
                   <span className="text-foreground font-medium">Resolution:</span>{" "}
                   {form.resolution_time || "—"}
                 </p>
                 <p>
                   <span className="text-foreground font-medium">Markets:</span>{" "}
-                  {extractedEvent?.sub_markets.length || 0} temperature buckets
+                  {extractedEvent?.sub_markets.length || 0} {weatherCategory.toLowerCase()} buckets
+                </p>
+                <p>
+                  <span className="text-foreground font-medium">
+                    {isEarthquake ? "Source:" : "Forecast:"}
+                  </span>{" "}
+                  {categoryDisplay.dataSource}
                 </p>
                 <p>
                   <span className="text-foreground font-medium">Sigma:</span>{" "}
-                  {form.sigma_temp}°C
+                  {form.sigma_temp}{weatherUnit}
                 </p>
                 <p>
                   <span className="text-foreground font-medium">Size:</span> $
