@@ -10,6 +10,7 @@ import type { PolymarketEvent } from "@/app/api/events/route";
 
 type ViewMode = "grid" | "list";
 type CategoryFilter = "all" | "Temperature" | "Snow" | "Earthquake" | "Climate" | "Weather" | "Storm" | "Rain";
+type StatusFilter = "active" | "resolved" | "all";
 
 function formatVolume(v: number): string {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
@@ -61,6 +62,7 @@ export default function EventsPage() {
   const [view, setView] = useState<ViewMode>("grid");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>("active");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timeAgoStr, setTimeAgoStr] = useState("");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -107,7 +109,12 @@ export default function EventsPage() {
 
   // Filter events
   const filtered = events.filter((e) => {
+    // Status filter
+    if (status === "active" && e.closed) return false;
+    if (status === "resolved" && !e.closed) return false;
+    // Category filter
     if (category !== "all" && e.category !== category) return false;
+    // Search filter
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -117,6 +124,9 @@ export default function EventsPage() {
     }
     return true;
   });
+
+  const activeCount = events.filter((e) => !e.closed).length;
+  const resolvedCount = events.filter((e) => e.closed).length;
 
   // Extract unique categories for filter
   const categories = Array.from(new Set(events.map((e) => e.category).filter(Boolean))) as string[];
@@ -158,74 +168,120 @@ export default function EventsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Input
-          placeholder="Search events..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="sm:max-w-xs"
-        />
-
-        <div className="flex gap-1.5 flex-wrap">
-          <button
-            onClick={() => setCategory("all")}
-            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-              category === "all"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted hover:bg-muted/80 border-transparent"
-            }`}
-          >
-            All ({events.length})
-          </button>
-          {categories.map((cat) => (
+      <div className="space-y-3">
+        {/* Row 1: Search + View toggle */}
+        <div className="flex items-center gap-3">
+          <Input
+            placeholder="Search events..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs h-9"
+          />
+          <div className="flex gap-1 ml-auto shrink-0">
             <button
-              key={cat}
-              onClick={() => setCategory(cat as CategoryFilter)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                category === cat
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-muted hover:bg-muted/80 border-transparent"
+              onClick={() => setView("grid")}
+              className={`p-1.5 rounded transition-colors ${
+                view === "grid"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+              title="Grid view"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setView("list")}
+              className={`p-1.5 rounded transition-colors ${
+                view === "list"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+              title="List view"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Status + Category filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status filter */}
+          <div className="flex items-center rounded-lg border bg-muted/40 p-0.5 gap-0.5">
+            {([
+              { key: "active", label: "Active", count: activeCount },
+              { key: "resolved", label: "Resolved", count: resolvedCount },
+              { key: "all", label: "All", count: events.length },
+            ] as const).map((s) => (
+              <button
+                key={s.key}
+                onClick={() => setStatus(s.key)}
+                className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
+                  status === s.key
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s.label}
+                <span className={`ml-1 ${status === s.key ? "text-foreground" : "text-muted-foreground/60"}`}>
+                  {s.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-border hidden sm:block" />
+
+          {/* Category filter */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={() => setCategory("all")}
+              className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
+                category === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
             >
-              {cat} ({events.filter((e) => e.category === cat).length})
+              All
             </button>
-          ))}
-        </div>
-
-        <div className="flex gap-1 ml-auto">
-          <button
-            onClick={() => setView("grid")}
-            className={`p-1.5 rounded border transition-colors ${
-              view === "grid"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            title="Grid view"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <rect x="3" y="3" width="7" height="7" rx="1" />
-              <rect x="14" y="3" width="7" height="7" rx="1" />
-              <rect x="3" y="14" width="7" height="7" rx="1" />
-              <rect x="14" y="14" width="7" height="7" rx="1" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setView("list")}
-            className={`p-1.5 rounded border transition-colors ${
-              view === "list"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            title="List view"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setCategory(cat as CategoryFilter)}
+                className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
+                  category === cat
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {cat}
+                <span className={`ml-1 tabular-nums ${category === cat ? "text-primary-foreground/70" : "text-muted-foreground/50"}`}>
+                  {events.filter((e) => e.category === cat).length}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* Result count */}
+      {!loading && (
+        <p className="text-xs text-muted-foreground">
+          {filtered.length} event{filtered.length !== 1 ? "s" : ""}
+          {status !== "all" && ` (${status})`}
+          {category !== "all" && ` in ${category}`}
+          {search && ` matching "${search}"`}
+        </p>
+      )}
 
       {/* Loading / Error */}
       {loading && (
@@ -246,7 +302,7 @@ export default function EventsPage() {
       {/* Empty state */}
       {!loading && !error && filtered.length === 0 && (
         <div className="rounded-md border p-8 text-center text-muted-foreground">
-          {search || category !== "all"
+          {search || category !== "all" || status !== "active"
             ? "No events match your filters."
             : "No active events found on Polymarket."}
         </div>
@@ -274,56 +330,56 @@ export default function EventsPage() {
 }
 
 function EventCard({ event }: { event: PolymarketEvent }) {
-  const isExpired = event.end_date
-    ? new Date(event.end_date) < new Date()
-    : false;
-
   return (
-    <Card className="hover:shadow-md transition-shadow flex flex-col">
+    <Card className={`hover:shadow-md transition-shadow flex flex-col ${event.closed ? "opacity-75" : ""}`}>
       <CardContent className="pt-4 flex-1 flex flex-col">
-        {/* Category + market count */}
+        {/* Category + status */}
         <div className="flex items-center gap-2 mb-2">
           <Badge
-            className={`text-xs border-0 ${categoryColor(event.category)}`}
+            className={`text-[10px] border-0 ${categoryColor(event.category)}`}
           >
             {event.category}
           </Badge>
-          <span className="text-xs text-muted-foreground">
-            {event.market_count} markets
+          <span className="text-[10px] text-muted-foreground">
+            {event.market_count} market{event.market_count !== 1 ? "s" : ""}
           </span>
-          {isExpired && (
-            <Badge variant="secondary" className="text-xs ml-auto">
-              Ended
+          {event.closed ? (
+            <Badge variant="outline" className="text-[10px] ml-auto border-muted-foreground/30 text-muted-foreground">
+              Resolved
             </Badge>
+          ) : (
+            <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Active
+            </span>
           )}
         </div>
 
         {/* Title */}
-        <h3 className="font-medium text-sm leading-snug mb-2 flex-1">
+        <h3 className="font-medium text-sm leading-snug mb-3 flex-1">
           {event.title}
         </h3>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground mb-3">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
           <div>
-            <span className="font-medium text-foreground">
+            <span className="font-semibold text-foreground tabular-nums">
               {formatVolume(event.volume)}
             </span>{" "}
-            volume
+            vol
           </div>
           <div>
-            <span className="font-medium text-foreground">
+            <span className="font-semibold text-foreground tabular-nums">
               {formatLiquidity(event.liquidity)}
             </span>{" "}
-            liquidity
+            liq
           </div>
           {event.end_date && (
-            <div className="col-span-2">
-              Ends{" "}
+            <div className="ml-auto">
+              {event.closed ? "Ended" : "Ends"}{" "}
               {new Date(event.end_date).toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
-                year: "numeric",
               })}
             </div>
           )}
@@ -334,7 +390,7 @@ function EventCard({ event }: { event: PolymarketEvent }) {
           href={`/new?url=${encodeURIComponent(event.url)}`}
           className="w-full"
         >
-          <Button size="sm" className="w-full">
+          <Button size="sm" variant={event.closed ? "outline" : "default"} className="w-full">
             Analyze
           </Button>
         </Link>
@@ -344,15 +400,14 @@ function EventCard({ event }: { event: PolymarketEvent }) {
 }
 
 function EventRow({ event }: { event: PolymarketEvent }) {
-  const isExpired = event.end_date
-    ? new Date(event.end_date) < new Date()
-    : false;
-
   return (
-    <div className="flex items-center gap-4 rounded-lg border p-3 hover:bg-muted/50 transition-colors">
+    <div className={`flex items-center gap-4 rounded-lg border p-3 hover:bg-muted/50 transition-colors ${event.closed ? "opacity-75" : ""}`}>
+      {/* Status dot */}
+      <span className={`shrink-0 h-2 w-2 rounded-full ${event.closed ? "bg-muted-foreground/40" : "bg-emerald-500"}`} />
+
       {/* Category */}
       <Badge
-        className={`text-xs border-0 shrink-0 ${categoryColor(event.category)}`}
+        className={`text-[10px] border-0 shrink-0 ${categoryColor(event.category)}`}
       >
         {event.category}
       </Badge>
@@ -361,19 +416,18 @@ function EventRow({ event }: { event: PolymarketEvent }) {
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{event.title}</p>
         <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
-          <span>{event.market_count} markets</span>
-          <span>{formatVolume(event.volume)} vol</span>
-          <span>{formatLiquidity(event.liquidity)} liq</span>
+          <span>{event.market_count} market{event.market_count !== 1 ? "s" : ""}</span>
+          <span className="tabular-nums">{formatVolume(event.volume)} vol</span>
+          <span className="tabular-nums">{formatLiquidity(event.liquidity)} liq</span>
           {event.end_date && (
             <span>
-              Ends{" "}
+              {event.closed ? "Ended" : "Ends"}{" "}
               {new Date(event.end_date).toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
               })}
             </span>
           )}
-          {isExpired && <span className="text-muted-foreground">(Ended)</span>}
         </div>
       </div>
 

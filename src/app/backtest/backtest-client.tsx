@@ -9,32 +9,98 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { BacktestCharts } from "./backtest-charts";
 import type { BacktestOutput, ScenarioResult } from "@/lib/types";
 
-const PROGRESS_MESSAGES = [
-  "Fetching temperature data from Open-Meteo...",
-  "Loading 5 years of climate history...",
-  "Running ensemble simulation (82 members)...",
-  "Computing probabilities for all buckets...",
-  "Calculating edge and Kelly sizing...",
-  "Resolving markets against actuals...",
-  "Aggregating P&L and metrics...",
+// ── Metric definitions ──
+
+type MetricKey = "temperature" | "snowfall" | "rainfall" | "wind_speed" | "earthquake_magnitude";
+
+interface MetricOption {
+  key: MetricKey;
+  label: string;
+  icon: string;
+  dataSource: string;
+}
+
+const METRICS: MetricOption[] = [
+  { key: "temperature", label: "Temperature", icon: "\u{1F321}\uFE0F", dataSource: "Open-Meteo Archive" },
+  { key: "snowfall", label: "Snowfall", icon: "\u2744\uFE0F", dataSource: "Open-Meteo Archive" },
+  { key: "rainfall", label: "Rainfall", icon: "\u{1F327}\uFE0F", dataSource: "Open-Meteo Archive" },
+  { key: "wind_speed", label: "Wind Speed", icon: "\u{1F32A}\uFE0F", dataSource: "Open-Meteo Archive" },
+  { key: "earthquake_magnitude", label: "Earthquake", icon: "\u{1F30D}", dataSource: "USGS FDSNWS" },
 ];
 
-const SCENARIO_INFO: Record<string, { title: string; what: string; how: string; implication: string }> = {
+const PROGRESS_MESSAGES: Record<MetricKey, string[]> = {
+  temperature: [
+    "Fetching temperature data from Open-Meteo...",
+    "Loading 5 years of climate history...",
+    "Running ensemble simulation (~194 members)...",
+    "Computing probabilities for all buckets...",
+    "Calculating edge and Kelly sizing...",
+    "Resolving markets against actuals...",
+    "Aggregating P&L and metrics...",
+  ],
+  snowfall: [
+    "Fetching snowfall data from Open-Meteo...",
+    "Loading 5 years of snowfall history...",
+    "Running ensemble simulation...",
+    "Computing snow bucket probabilities...",
+    "Calculating edge and Kelly sizing...",
+    "Resolving markets against actuals...",
+    "Aggregating P&L and metrics...",
+  ],
+  rainfall: [
+    "Fetching precipitation data from Open-Meteo...",
+    "Loading 5 years of rainfall history...",
+    "Running ensemble simulation...",
+    "Computing rain bucket probabilities...",
+    "Calculating edge and Kelly sizing...",
+    "Resolving markets against actuals...",
+    "Aggregating P&L and metrics...",
+  ],
+  wind_speed: [
+    "Fetching wind gust data from Open-Meteo...",
+    "Loading 5 years of wind history...",
+    "Running ensemble simulation...",
+    "Computing wind speed bucket probabilities...",
+    "Calculating edge and Kelly sizing...",
+    "Resolving markets against actuals...",
+    "Aggregating P&L and metrics...",
+  ],
+  earthquake_magnitude: [
+    "Fetching earthquake data from USGS...",
+    "Loading 20 years of seismic history...",
+    "Building Poisson frequency model (1000 synthetic members)...",
+    "Computing magnitude threshold probabilities...",
+    "Calculating edge and Kelly sizing...",
+    "Resolving markets against actuals...",
+    "Aggregating P&L and metrics...",
+  ],
+};
+
+const SCENARIO_INFO: Record<string, { what: string; how: string; implication: string }> = {
   "Climatological Market": {
-    title: "vs Climatological Market",
-    what: "Simulates a market where prices are set purely by historical base rates — as if traders only looked at 5 years of climate data and ignored weather forecasts entirely.",
-    how: "Each temperature bucket is priced by its historical frequency (Laplace-smoothed). For example, if \"72-73°F\" occurred 8% of the time historically, that bucket is priced at ¢8.",
-    implication: "This is the easiest market to beat. Our ensemble forecast (ECMWF + GFS) has real information about tomorrow's weather that the market completely ignores. Most of our edge comes from BUY NO on tail buckets that are overpriced by climate averages.",
+    what: "Simulates a market where prices are set purely by historical base rates \u2014 as if traders only looked at years of historical data and ignored forecasts entirely.",
+    how: "Each bucket is priced by its historical frequency (Laplace-smoothed). For example, if a temperature range occurred 8% of the time historically, that bucket is priced at \u00A28.",
+    implication: "This is the easiest market to beat. Our ensemble forecast has real information that the market completely ignores. Most edge comes from BUY NO on tail buckets overpriced by base rates.",
   },
   "Noisy Forecast Market": {
-    title: "vs Noisy Forecast Market",
-    what: "Simulates a more realistic market where traders use weather forecasts, but with lower accuracy than our ensemble model (σ = 2.5°C uncertainty vs our ~1.0°C).",
-    how: "Market prices are derived from a Normal distribution around a noisy forecast (actual temp + Gaussian bias at σ = 1.8°C), with σ = 2.5°C spread. Our model uses a tighter 82-member ensemble.",
+    what: "Simulates a more realistic market where traders use forecasts, but with lower accuracy than our ensemble model.",
+    how: "Market prices are derived from a Normal distribution around a noisy forecast (actual + Gaussian bias). Our model uses a tighter multi-member ensemble.",
     implication: "This is a harder but more realistic scenario. Edge is smaller because the market already has forecast information. Our advantage comes from having more ensemble members and tighter calibration.",
   },
 };
 
+const DATA_SOURCE_INFO: Record<MetricKey, string> = {
+  temperature: "Actual daily max temperatures from Open-Meteo Archive API. Climatology from 2019-2024 (5 years).",
+  snowfall: "Actual daily snowfall from Open-Meteo Archive API. Climatology from 2019-2024 (5 years).",
+  rainfall: "Actual daily precipitation from Open-Meteo Archive API. Climatology from 2019-2024 (5 years).",
+  wind_speed: "Actual daily max wind gusts from Open-Meteo Archive API. Climatology from 2019-2024 (5 years).",
+  earthquake_magnitude: "Actual seismic events from USGS FDSNWS API. 20-year historical lookback, 250km radius per location.",
+};
+
+// ── Config state ──
+
 interface BacktestConfigState {
+  metric: MetricKey;
   start: string;
   end: string;
   feeBps: string;
@@ -44,6 +110,7 @@ interface BacktestConfigState {
 }
 
 const DEFAULT_CONFIG: BacktestConfigState = {
+  metric: "temperature",
   start: "2025-08-15",
   end: "2026-02-15",
   feeBps: "100",
@@ -64,9 +131,12 @@ export function BacktestClient() {
   const [config, setConfig] = useState<BacktestConfigState>(DEFAULT_CONFIG);
   const [showConfig, setShowConfig] = useState(false);
 
+  const currentMetric = METRICS.find((m) => m.key === config.metric) ?? METRICS[0];
+
   const buildUrl = useCallback((fresh: boolean) => {
     const params = new URLSearchParams();
     if (fresh) params.set("fresh", "1");
+    if (config.metric !== "temperature") params.set("metric", config.metric);
     if (config.start !== DEFAULT_CONFIG.start) params.set("start", config.start);
     if (config.end !== DEFAULT_CONFIG.end) params.set("end", config.end);
     if (config.feeBps !== DEFAULT_CONFIG.feeBps) params.set("feeBps", config.feeBps);
@@ -98,27 +168,58 @@ export function BacktestClient() {
   useEffect(() => { runBacktest(); }, [runBacktest]);
 
   // Cycle progress messages
+  const progressMsgs = PROGRESS_MESSAGES[config.metric];
   useEffect(() => {
     if (state.status !== "loading") return;
     const interval = setInterval(() => {
-      setMsgIdx((prev) => (prev + 1) % PROGRESS_MESSAGES.length);
+      setMsgIdx((prev) => (prev + 1) % progressMsgs.length);
     }, 3000);
     return () => clearInterval(interval);
-  }, [state.status]);
+  }, [state.status, progressMsgs.length]);
 
-  // ── Config Panel (always visible) ──
+  // ── Metric Selector ──
+  const metricSelector = (
+    <div className="flex flex-wrap gap-2">
+      {METRICS.map((m) => (
+        <button
+          key={m.key}
+          onClick={() => {
+            if (m.key !== config.metric) {
+              setConfig((c) => ({ ...c, metric: m.key }));
+            }
+          }}
+          className={`
+            flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+            ${m.key === config.metric
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+            }
+          `}
+        >
+          <span>{m.icon}</span>
+          <span>{m.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  // ── Config Panel ──
   const configPanel = (
     <Card>
       <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowConfig((v) => !v)}>
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Configuration</CardTitle>
           <span className="text-xs text-muted-foreground">
-            {showConfig ? "▲ Hide" : "▼ Show"} &middot; ${config.baseSizeUsd} base &middot; {config.confidence}% confidence &middot; Fee {config.feeBps} bps &middot; Slip {config.slippageBps} bps &middot; {config.start} → {config.end}
+            {showConfig ? "\u25B2 Hide" : "\u25BC Show"} &middot; {currentMetric.icon} {currentMetric.label} &middot; ${config.baseSizeUsd} base &middot; {config.confidence}% confidence &middot; Fee {config.feeBps} bps &middot; Slip {config.slippageBps} bps &middot; {config.start} &rarr; {config.end}
           </span>
         </div>
       </CardHeader>
       {showConfig && (
-        <CardContent className="pt-0">
+        <CardContent className="pt-0 space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Metric</Label>
+            {metricSelector}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="bt-start" className="text-xs">Start Date</Label>
@@ -190,7 +291,11 @@ export function BacktestClient() {
   if (state.status === "idle" || state.status === "loading") {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Strategy Backtest</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Strategy Backtest</h1>
+          <p className="text-sm text-muted-foreground mt-1">Historical backtest across Climate &amp; Science metrics</p>
+        </div>
+        {metricSelector}
         {configPanel}
         <Card>
           <CardContent className="py-16 flex flex-col items-center gap-4">
@@ -199,7 +304,7 @@ export function BacktestClient() {
               <div className="absolute inset-0 border-4 border-t-primary rounded-full animate-spin" />
             </div>
             <p className="text-sm font-medium text-muted-foreground animate-pulse">
-              {PROGRESS_MESSAGES[msgIdx]}
+              {progressMsgs[msgIdx % progressMsgs.length]}
             </p>
             <p className="text-xs text-muted-foreground">
               This takes 10-30 seconds on first load (cached for 1 hour after)
@@ -214,7 +319,11 @@ export function BacktestClient() {
   if (state.status === "error") {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Strategy Backtest</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Strategy Backtest</h1>
+          <p className="text-sm text-muted-foreground mt-1">Historical backtest across Climate &amp; Science metrics</p>
+        </div>
+        {metricSelector}
         {configPanel}
         <Card>
           <CardContent className="py-8">
@@ -230,17 +339,22 @@ export function BacktestClient() {
 
   // ── Results ──
   const { data } = state;
+  const metricLabel = currentMetric.label;
+  const hasMultipleScenarios = data.scenarios.length > 1;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Strategy Backtest</h1>
+          <h1 className="text-2xl font-bold">
+            {currentMetric.icon} {metricLabel} Backtest
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {data.config.start} &rarr; {data.config.end} &middot; {data.config.cities.join(", ")}
             &middot; ${data.config.baseSize} base &middot; {data.config.confidence}% confidence
             &middot; Fee {data.config.feeBps} bps &middot; Slip {data.config.slippageBps} bps
+            {data.config.unit && <> &middot; Unit: {data.config.unit}</>}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => runBacktest(true)}>
@@ -248,23 +362,31 @@ export function BacktestClient() {
         </Button>
       </div>
 
+      {/* Metric Selector */}
+      {metricSelector}
+
       {/* Config Panel */}
       {configPanel}
 
-      {/* Scenario Tabs */}
-      <Tabs defaultValue="climatological">
-        <TabsList>
-          <TabsTrigger value="climatological">vs Climatological Market</TabsTrigger>
-          <TabsTrigger value="noisy">vs Noisy Forecast Market</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="climatological">
-          <ScenarioView scenario={data.scenarios[0]} />
-        </TabsContent>
-        <TabsContent value="noisy">
-          <ScenarioView scenario={data.scenarios[1]} />
-        </TabsContent>
-      </Tabs>
+      {/* Scenario Tabs (or single view for earthquake) */}
+      {hasMultipleScenarios ? (
+        <Tabs defaultValue={`scenario-0`}>
+          <TabsList>
+            {data.scenarios.map((s, i) => (
+              <TabsTrigger key={i} value={`scenario-${i}`}>
+                {s.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {data.scenarios.map((s, i) => (
+            <TabsContent key={i} value={`scenario-${i}`}>
+              <ScenarioView scenario={s} />
+            </TabsContent>
+          ))}
+        </Tabs>
+      ) : (
+        data.scenarios[0] && <ScenarioView scenario={data.scenarios[0]} />
+      )}
 
       {/* Methodology */}
       <Card>
@@ -273,14 +395,14 @@ export function BacktestClient() {
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-2">
           <p>
-            <strong className="text-foreground">Real data:</strong> Actual daily max temperatures from Open-Meteo Archive API
-            ({data.config.cities.length} cities, {data.config.start} to {data.config.end}).
-            Climatology from 2019-2024 (5 years).
+            <strong className="text-foreground">Real data:</strong> {DATA_SOURCE_INFO[config.metric]}
           </p>
           <p>
-            <strong className="text-foreground">Simulated:</strong> Ensemble forecasts (actual temp + calibrated Gaussian noise:
-            ECMWF 51 members at 1.0&deg;C spread, GFS 31 members at 1.3&deg;C spread).
-            Market prices (Climatological: 5-year base rates; Noisy Forecast: 2.5&deg;C uncertainty model).
+            <strong className="text-foreground">Simulated:</strong>{" "}
+            {config.metric === "earthquake_magnitude"
+              ? "Ensemble via Poisson frequency model (1000 synthetic members from 20-year USGS history). Market prices from climatological base rates."
+              : "Ensemble forecasts (actual value + calibrated Gaussian noise with metric-specific spread across 5 NWP models). Market prices via two scenarios (climatological base rates and noisy forecast model)."
+            }
           </p>
           <p>
             <strong className="text-foreground">Not included:</strong> Real Polymarket prices, actual historical ensemble runs,
@@ -301,6 +423,16 @@ function ScenarioView({ scenario }: { scenario: ScenarioResult }) {
   const { metrics } = scenario;
   const info = SCENARIO_INFO[scenario.name];
 
+  if (metrics.totalTrades === 0) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="py-8 text-center text-muted-foreground">
+          No trades executed in this scenario.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6 mt-4">
       {/* Scenario Explanation */}
@@ -320,7 +452,7 @@ function ScenarioView({ scenario }: { scenario: ScenarioResult }) {
           <div className="flex flex-col sm:flex-row gap-6">
             {/* Big P&L */}
             <div className="flex-shrink-0">
-              <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Total P&L</div>
+              <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Total P&amp;L</div>
               <div className={`text-4xl font-black font-mono ${metrics.totalPnl >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {metrics.totalPnl >= 0 ? "+" : ""}${metrics.totalPnl.toFixed(2)}
               </div>
@@ -334,7 +466,7 @@ function ScenarioView({ scenario }: { scenario: ScenarioResult }) {
               <StatBox label="Win Rate" value={`${metrics.winRate}%`} />
               <StatBox label="ROI" value={`${metrics.roi}%`} positive={metrics.roi > 0} />
               <StatBox label="Sharpe" value={metrics.sharpe.toFixed(1)} positive={metrics.sharpe > 1} />
-              <StatBox label="Profit Factor" value={`${metrics.profitFactor}x`} />
+              <StatBox label="Profit Factor" value={metrics.profitFactor >= 999 ? "\u221E" : `${metrics.profitFactor}x`} />
               <StatBox label="Max Drawdown" value={`-$${metrics.maxDrawdown.toFixed(2)}`} negative />
             </div>
           </div>

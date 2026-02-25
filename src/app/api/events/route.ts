@@ -25,19 +25,26 @@ export async function GET() {
   try {
     const tagIds = [84, 103040]; // Weather + Daily Temperature
 
-    // Fetch all tags in parallel
-    const results = await Promise.all(
-      tagIds.map(async (tagId) => {
-        const url = `https://gamma-api.polymarket.com/events?closed=false&limit=50&order=volume&ascending=false&tag_id=${tagId}&related_tags=true`;
-        const res = await fetch(url, {
-          headers: { Accept: "application/json" },
-          next: { revalidate: 300 }, // Cache for 5 minutes
-        });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return Array.isArray(data) ? data : [];
-      })
-    );
+    // Fetch both active and closed events for each tag in parallel
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fetches: Promise<any[]>[] = [];
+    for (const tagId of tagIds) {
+      for (const closed of [false, true]) {
+        fetches.push(
+          (async () => {
+            const url = `https://gamma-api.polymarket.com/events?closed=${closed}&limit=50&order=volume&ascending=false&tag_id=${tagId}&related_tags=true`;
+            const res = await fetch(url, {
+              headers: { Accept: "application/json" },
+              next: { revalidate: 300 }, // Cache for 5 minutes
+            });
+            if (!res.ok) return [];
+            const data = await res.json();
+            return Array.isArray(data) ? data : [];
+          })()
+        );
+      }
+    }
+    const results = await Promise.all(fetches);
 
     // Merge and deduplicate by event ID
     const seen = new Set<string>();
