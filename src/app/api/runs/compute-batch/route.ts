@@ -12,7 +12,8 @@ export async function POST(request: NextRequest) {
     if (!body.event_url || !body.event_title || !body.resolution_time) {
       return NextResponse.json({ error: "Missing event fields" }, { status: 400 });
     }
-    if (!body.lat || !body.lon) {
+    const config = getConfigForMetric(body.weather_metric ?? "temperature");
+    if (config.requiresLocation && (body.lat == null || body.lon == null)) {
       return NextResponse.json({ error: "Missing coordinates" }, { status: 400 });
     }
     if (!body.sub_markets || body.sub_markets.length === 0) {

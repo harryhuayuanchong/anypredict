@@ -36,13 +36,12 @@ export const CATEGORIES = [
   { value: "OVERALL", label: "Overall" },
   { value: "POLITICS", label: "Politics" },
   { value: "SPORTS", label: "Sports" },
-  { value: "CRYPTO", label: "Crypto" },
-  { value: "CULTURE", label: "Culture" },
-  { value: "MENTIONS", label: "Mentions" },
-  { value: "WEATHER", label: "Weather" },
-  { value: "ECONOMICS", label: "Economics" },
+  { value: "CLIMATE", label: "Climate" },
+  { value: "GEOPOLITICS", label: "Geopolitics" },
   { value: "TECH", label: "Tech" },
-  { value: "FINANCE", label: "Finance" },
+  { value: "CRYPTO", label: "Crypto" },
+  { value: "ECONOMICS", label: "Economics" },
+  { value: "CULTURE", label: "Culture" },
 ] as const;
 
 export const TIME_PERIODS = [
@@ -136,14 +135,14 @@ export function inferCategoryFromData(positions: Record<string, unknown>[], acti
   if (!corpus) return null;
 
   const rules = [
-    { category: "Sports", words: ["fc", "nba", "nfl", "mlb", "score", "match", "vs", "goal"] },
-    { category: "Politics", words: ["election", "president", "senate", "vote", "campaign"] },
-    { category: "Crypto", words: ["btc", "bitcoin", "eth", "ethereum", "solana", "token"] },
-    { category: "Economics", words: ["inflation", "fed", "rate", "cpi", "gdp"] },
-    { category: "Tech", words: ["ai", "openai", "apple", "google", "tesla", "nvidia"] },
-    { category: "Finance", words: ["stock", "nasdaq", "s&p", "earnings", "bond"] },
-    { category: "Weather", words: ["hurricane", "rainfall", "temperature", "snow"] },
-    { category: "Culture", words: ["movie", "oscar", "grammy", "celebrity"] },
+    { category: "Politics", words: ["election", "president", "senate", "vote", "campaign", "congress", "party"] },
+    { category: "Sports", words: ["fc", "nba", "nfl", "mlb", "score", "match", "vs", "goal", "championship"] },
+    { category: "Climate", words: ["hurricane", "rainfall", "temperature", "snow", "climate", "weather", "drought", "flood"] },
+    { category: "Geopolitics", words: ["war", "sanctions", "nato", "treaty", "conflict", "diplomacy", "tariff", "invasion"] },
+    { category: "Tech", words: ["ai", "openai", "apple", "google", "tesla", "nvidia", "software", "chip"] },
+    { category: "Crypto", words: ["btc", "bitcoin", "eth", "ethereum", "solana", "token", "defi", "nft"] },
+    { category: "Economics", words: ["inflation", "fed", "rate", "cpi", "gdp", "recession", "stock", "nasdaq", "earnings"] },
+    { category: "Culture", words: ["movie", "oscar", "grammy", "celebrity", "music", "award", "film"] },
   ];
 
   let best: { category: string; score: number } | null = null;

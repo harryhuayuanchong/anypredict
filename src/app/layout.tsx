@@ -49,6 +49,9 @@ export default function RootLayout({
               <Link href="/pilot" className="hover:text-foreground transition-colors">
                 Pilot
               </Link>
+              <Link href="/leaderboard" className="hover:text-foreground transition-colors">
+                Leaderboard
+              </Link>
             </nav>
           </div>
         </header>

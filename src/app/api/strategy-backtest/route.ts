@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runStrategyBacktest } from "@/lib/backtest-engine";
 import type { BacktestConfig } from "@/lib/backtest-engine";
 import type { BacktestOutput } from "@/lib/types";
+import type { WeatherMetric } from "@/lib/weather-config";
 
 // Vercel Pro: up to 300s. Hobby: 10s (too short).
 // Local dev / self-hosted: no timeout.
@@ -11,6 +12,10 @@ export const maxDuration = 60;
 const cache = new Map<string, { result: BacktestOutput; time: number }>();
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+const VALID_METRICS: WeatherMetric[] = [
+  "temperature", "snowfall", "rainfall", "wind_speed", "earthquake_magnitude",
+];
+
 function parseConfig(params: URLSearchParams): BacktestConfig {
   const config: BacktestConfig = {};
   const start = params.get("start");
@@ -19,6 +24,7 @@ function parseConfig(params: URLSearchParams): BacktestConfig {
   const slippageBps = params.get("slippageBps");
   const baseSizeUsd = params.get("baseSizeUsd");
   const confidence = params.get("confidence");
+  const metric = params.get("metric");
 
   if (start) config.start = start;
   if (end) config.end = end;
@@ -26,6 +32,9 @@ function parseConfig(params: URLSearchParams): BacktestConfig {
   if (slippageBps) config.slippageBps = parseInt(slippageBps, 10);
   if (baseSizeUsd) config.baseSizeUsd = parseInt(baseSizeUsd, 10);
   if (confidence) config.confidence = parseInt(confidence, 10);
+  if (metric && VALID_METRICS.includes(metric as WeatherMetric)) {
+    config.metric = metric as WeatherMetric;
+  }
 
   return config;
 }

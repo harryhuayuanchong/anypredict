@@ -65,8 +65,8 @@ export function PnlChart({ data }: { data: ChartPoint[] }) {
           width={70}
         />
         <Tooltip
-          formatter={(value: number) => [formatUsd(value), "PNL"]}
-          labelFormatter={(label: number) =>
+          formatter={(value) => [formatUsd(Number(value)), "PNL"]}
+          labelFormatter={(label) =>
             new Date(label).toLocaleDateString("en-US", {
               month: "short",
               day: "numeric",

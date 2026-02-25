@@ -120,12 +120,11 @@ export type Category =
   | "OVERALL"
   | "POLITICS"
   | "SPORTS"
-  | "CRYPTO"
-  | "CULTURE"
-  | "MENTIONS"
-  | "WEATHER"
-  | "ECONOMICS"
+  | "CLIMATE"
+  | "GEOPOLITICS"
   | "TECH"
-  | "FINANCE";
+  | "CRYPTO"
+  | "ECONOMICS"
+  | "CULTURE";
 
 export type TimePeriod = "DAY" | "WEEK" | "MONTH" | "ALL";
