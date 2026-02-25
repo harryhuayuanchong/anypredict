@@ -2,8 +2,6 @@
 
 import { ArrowUpDown, Copy, ExternalLink, Star } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -16,9 +14,21 @@ import type { LeaderboardRow, SortState } from "@/lib/leaderboard/types";
 import {
   extractWalletAddress,
   formatCurrency,
+  getSmartMoneyTags,
   normalizeUsername,
   shortAddress,
+  type SmartMoneyTag,
 } from "@/lib/leaderboard/utils";
+
+const TAG_COLORS: Record<SmartMoneyTag["color"], string> = {
+  blue: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  purple: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  green: "bg-green-500/15 text-green-400 border-green-500/20",
+  orange: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  red: "bg-red-500/15 text-red-400 border-red-500/20",
+  yellow: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
+  cyan: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+};
 
 type Props = {
   rows: LeaderboardRow[];
@@ -83,11 +93,12 @@ export function LeaderboardTable({
         {rows.map((row) => {
           const resolvedAddress = extractWalletAddress(row.address || row.name);
           const tracked = isTracked(resolvedAddress);
+          const tags = getSmartMoneyTags(row);
           return (
             <TableRow key={row.address ?? row.rank ?? Math.random()}>
               <TableCell className="font-medium">{row.rank ?? "—"}</TableCell>
               <TableCell>
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <button
                     className="inline-flex items-center gap-1 text-left hover:underline"
                     onClick={() => row.address && onOpenWallet(row)}
@@ -95,11 +106,6 @@ export function LeaderboardTable({
                     <span className="font-medium">
                       {normalizeUsername(row.name, row.address)}
                     </span>
-                    {row.isSmartMoney && (
-                      <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                        Smart Money
-                      </Badge>
-                    )}
                     <ExternalLink className="size-3 text-muted-foreground" />
                   </button>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -117,6 +123,18 @@ export function LeaderboardTable({
                       </button>
                     )}
                   </div>
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <span
+                          key={tag.label}
+                          className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-medium leading-4 ${TAG_COLORS[tag.color]}`}
+                        >
+                          {tag.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </TableCell>
               <TableCell className="hidden sm:table-cell max-w-[200px] truncate text-muted-foreground">

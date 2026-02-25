@@ -122,6 +122,64 @@ export function classifySmartMoney(row: LeaderboardRow, labels: LabelEntry[]) {
   return labelMatch || strongPnlRule || topRankRule;
 }
 
+export type SmartMoneyTag = {
+  label: string;
+  color: "blue" | "purple" | "green" | "orange" | "red" | "yellow" | "cyan";
+};
+
+const LABEL_TAG_RULES: { keywords: string[]; tag: string; color: SmartMoneyTag["color"] }[] = [
+  { keywords: ["whale"], tag: "Whale", color: "cyan" },
+  { keywords: ["market maker", "mm"], tag: "Market Maker", color: "purple" },
+  { keywords: ["fund", "capital", "hedge"], tag: "Fund", color: "blue" },
+  { keywords: ["vc", "venture"], tag: "VC", color: "orange" },
+  { keywords: ["dao", "treasury"], tag: "DAO", color: "yellow" },
+  { keywords: ["quant", "arbitrage"], tag: "Quant", color: "green" },
+  { keywords: ["prop", "proprietary"], tag: "Prop Firm", color: "purple" },
+];
+
+export function getSmartMoneyTags(row: LeaderboardRow): SmartMoneyTag[] {
+  const tags: SmartMoneyTag[] = [];
+
+  // Tags from wallet labels
+  const labelText = row.labels
+    .map((l) =>
+      [l.address_name, l.label, l.label_type, l.label_subtype]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+    )
+    .join(" ");
+
+  for (const rule of LABEL_TAG_RULES) {
+    if (rule.keywords.some((kw) => labelText.includes(kw))) {
+      tags.push({ label: rule.tag, color: rule.color });
+    }
+  }
+
+  // Performance-based tags
+  const volume = row.volume || 0;
+  const pnl = row.pnl || 0;
+  const pnlToVolume = volume > 0 ? pnl / volume : 0;
+
+  if (row.rank !== null && row.rank <= 5 && pnl > 0) {
+    tags.push({ label: "Top 5", color: "yellow" });
+  }
+
+  if (pnl >= 5000 && volume >= 10000 && pnlToVolume >= 0.1) {
+    tags.push({ label: "High ROI", color: "green" });
+  }
+
+  if (volume >= 100000) {
+    tags.push({ label: "High Volume", color: "blue" });
+  }
+
+  if (pnl < -5000) {
+    tags.push({ label: "Degen", color: "red" });
+  }
+
+  return tags;
+}
+
 // ── Category Inference ──────────────────────────────────
 
 export function inferCategoryFromData(positions: Record<string, unknown>[], activity: Record<string, unknown>[]): string | null {
